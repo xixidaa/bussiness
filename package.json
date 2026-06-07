@@ -1,0 +1,25 @@
+{
+  "name": "merchant-receipt-statistics",
+  "version": "1.0.0",
+  "private": true,
+  "description": "商家收款数据统计管理H5系统",
+  "scripts": {
+    "install:all": "npm install --prefix server && npm install --prefix client",
+    "db:start": "docker compose up -d mongo",
+    "db:stop": "docker compose stop mongo",
+    "db:inspect": "npm run db:inspect --prefix server",
+    "migrate:cleanup": "npm run migrate:cleanup --prefix server",
+    "dev:server": "npm run dev --prefix server",
+    "dev:client": "npm run dev --prefix client",
+    "start": "npm run start --prefix server",
+    "build": "npm run build --prefix client"
+  },
+  "keywords": [
+    "vue3",
+    "vite",
+    "express",
+    "receipt-statistics"
+  ],
+  "author": "",
+  "license": "MIT"
+}

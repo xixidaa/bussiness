@@ -1,0 +1,22 @@
+{
+  "name": "merchant-receipt-statistics-server",
+  "version": "1.0.0",
+  "type": "module",
+  "private": true,
+  "scripts": {
+    "dev": "nodemon src/app.js",
+    "start": "node src/app.js",
+    "db:inspect": "node src/scripts/inspect-db.js",
+    "migrate:cleanup": "node src/scripts/migrate-cleanup.js"
+  },
+  "dependencies": {
+    "cors": "^2.8.5",
+    "express": "^4.19.2",
+    "mongodb-memory-server-core": "^10.2.1",
+    "mongoose": "^8.18.0",
+    "nanoid": "^5.0.7"
+  },
+  "devDependencies": {
+    "nodemon": "^3.1.4"
+  }
+}
