@@ -14,7 +14,7 @@ const EMBEDDED_DB_PATH = path.resolve(__dirname, '../.mongo-data');
 const receiptSchema = new mongoose.Schema(
   {
     id: { type: String, required: true, unique: true },
-    channel: { type: String, required: true, enum: ['wechat', 'alipay'] },
+    channel: { type: String, required: true, enum: ['wechat', 'alipay', 'cash'] },
     granularity: { type: String, required: true, enum: ['year', 'month', 'day'] },
     period: { type: String, required: true },
     date: { type: String, required: true },

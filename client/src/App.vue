@@ -98,7 +98,7 @@
               >
                 <span>{{ formatPeriodLabel('year', item.period) }}</span>
                 <strong>{{ money(item.summary.total.amount) }}</strong>
-                <small>{{ item.summary.total.people }} 人 / 微信 {{ money(item.summary.wechat.amount) }} / 支付宝 {{ money(item.summary.alipay.amount) }}</small>
+                <small>{{ item.summary.total.people }} 人 / 微信 {{ money(item.summary.wechat.amount) }} / 支付宝 {{ money(item.summary.alipay.amount) }} / 现金 {{ money(item.summary.cash.amount) }}</small>
               </article>
             </template>
 
@@ -155,8 +155,14 @@
             <small>{{ summary.alipay.people }} 人</small>
           </article>
 
+          <article class="kpi-card card-cash">
+            <span>现金收款</span>
+            <strong>{{ money(summary.cash.amount) }}</strong>
+            <small>{{ summary.cash.people }} 人</small>
+          </article>
+
           <article class="kpi-card card-total">
-            <span>双渠道合计</span>
+            <span>全渠道合计</span>
             <strong>{{ money(summary.total.amount) }}</strong>
             <small>客单价 {{ averagePerPerson }}</small>
           </article>
@@ -166,7 +172,7 @@
               <div>
                 <span class="section-kicker">Trend</span>
                 <h2>{{ chartTitle }}</h2>
-                <p>按当前统计粒度展示微信、支付宝与合计走势。</p>
+                <p>按当前统计粒度展示微信、支付宝、现金与合计走势。</p>
               </div>
             </div>
             <div ref="chartRef" class="chart-box"></div>
@@ -214,6 +220,7 @@
                 <div class="detail-values">
                   <span>微信 {{ money(item.summary.wechat.amount) }}</span>
                   <span>支付宝 {{ money(item.summary.alipay.amount) }}</span>
+                  <span>现金 {{ money(item.summary.cash.amount) }}</span>
                   <span>{{ item.summary.total.people }} 人</span>
                 </div>
               </article>
@@ -355,7 +362,7 @@
                 <div class="record-meta">
                   <div class="record-badges">
                     <el-tag round>{{ granularityText(item.granularity) }}</el-tag>
-                    <el-tag round :type="item.channel === 'wechat' ? 'success' : 'primary'">
+                    <el-tag round :type="item.channel === 'wechat' ? 'success' : item.channel === 'alipay' ? 'primary' : 'warning'">
                       {{ channelText(item.channel) }}
                     </el-tag>
                     <el-tag v-if="item.isOverridden" round type="warning">已被日汇总覆盖</el-tag>
@@ -433,13 +440,15 @@ const entryGranularityOptions = [
 
 const channelOptions = [
   { label: '微信', value: 'wechat' },
-  { label: '支付宝', value: 'alipay' }
+  { label: '支付宝', value: 'alipay' },
+  { label: '现金', value: 'cash' }
 ];
 
 const channelFilterOptions = [
   { label: '全部', value: 'all' },
   { label: '微信', value: 'wechat' },
-  { label: '支付宝', value: 'alipay' }
+  { label: '支付宝', value: 'alipay' },
+  { label: '现金', value: 'cash' }
 ];
 
 const metricOptions = [
@@ -457,6 +466,7 @@ function createSummaryState() {
   return {
     wechat: { amount: 0, people: 0 },
     alipay: { amount: 0, people: 0 },
+    cash: { amount: 0, people: 0 },
     total: { amount: 0, people: 0 }
   };
 }
@@ -574,7 +584,9 @@ function granularityText(granularity) {
 }
 
 function channelText(channel) {
-  return channel === 'wechat' ? '微信' : '支付宝';
+  if (channel === 'wechat') return '微信';
+  if (channel === 'alipay') return '支付宝';
+  return '现金';
 }
 
 function money(value) {
@@ -611,7 +623,7 @@ function formatCreatedAt(value) {
 }
 
 function assignSummary(target, nextSummary) {
-  for (const key of ['wechat', 'alipay', 'total']) {
+  for (const key of ['wechat', 'alipay', 'cash', 'total']) {
     target[key].amount = Number(nextSummary?.[key]?.amount || 0);
     target[key].people = Number(nextSummary?.[key]?.people || 0);
   }
@@ -732,6 +744,13 @@ const shareRows = computed(() => {
       color: 'linear-gradient(90deg, #38bdf8, #2563eb)'
     },
     {
+      key: 'cash-amount',
+      label: '现金金额占比',
+      value: money(summary.cash.amount),
+      percent: totalAmount ? Math.round((summary.cash.amount / totalAmount) * 100) : 0,
+      color: 'linear-gradient(90deg, #f97316, #facc15)'
+    },
+    {
       key: 'wechat-people',
       label: '微信人数占比',
       value: `${summary.wechat.people} 人`,
@@ -744,6 +763,13 @@ const shareRows = computed(() => {
       value: `${summary.alipay.people} 人`,
       percent: totalPeople ? Math.round((summary.alipay.people / totalPeople) * 100) : 0,
       color: 'linear-gradient(90deg, #8b5cf6, #ec4899)'
+    },
+    {
+      key: 'cash-people',
+      label: '现金人数占比',
+      value: `${summary.cash.people} 人`,
+      percent: totalPeople ? Math.round((summary.cash.people / totalPeople) * 100) : 0,
+      color: 'linear-gradient(90deg, #ef4444, #f59e0b)'
     }
   ];
 });
@@ -1069,12 +1095,13 @@ function renderChart() {
   const xAxisData = chartRows.map((item) => item.period);
   const wechatData = chartRows.map((item) => Number(item.summary?.wechat?.[analytics.metric] || 0));
   const alipayData = chartRows.map((item) => Number(item.summary?.alipay?.[analytics.metric] || 0));
+  const cashData = chartRows.map((item) => Number(item.summary?.cash?.[analytics.metric] || 0));
   const totalData = chartRows.map((item) => Number(item.summary?.total?.[analytics.metric] || 0));
   const noData = xAxisData.length === 0;
 
   chartInstance.setOption(
     {
-      color: ['#0f766e', '#2563eb', '#f59e0b'],
+      color: ['#0f766e', '#2563eb', '#f97316', '#f59e0b'],
       tooltip: {
         trigger: 'axis',
         backgroundColor: '#132238',
@@ -1087,7 +1114,7 @@ function renderChart() {
         itemWidth: 14,
         itemHeight: 14,
         textStyle: { color: '#38506b' },
-        data: ['微信', '支付宝', '合计']
+        data: ['微信', '支付宝', '现金', '合计']
       },
       grid: {
         top: 56,
@@ -1151,6 +1178,15 @@ function renderChart() {
           lineStyle: { width: 3 },
           areaStyle: { opacity: 0.06 },
           data: alipayData
+        },
+        {
+          name: '现金',
+          type: 'line',
+          smooth: true,
+          symbolSize: 8,
+          lineStyle: { width: 3 },
+          areaStyle: { opacity: 0.05 },
+          data: cashData
         },
         {
           name: '合计',

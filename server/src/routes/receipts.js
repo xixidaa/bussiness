@@ -4,7 +4,7 @@ import { readReceipts, writeReceipts } from '../storage.js';
 
 const router = express.Router();
 
-const CHANNELS = new Set(['wechat', 'alipay']);
+const CHANNELS = new Set(['wechat', 'alipay', 'cash']);
 const ANALYTICS_GRANULARITIES = new Set(['year', 'month', 'day']);
 const ENTRY_GRANULARITIES = new Set(['month', 'day']);
 const PERIOD_PATTERNS = {
@@ -85,6 +85,7 @@ function summarizeReceipts(receipts) {
   const summary = {
     wechat: { amount: 0, people: 0 },
     alipay: { amount: 0, people: 0 },
+    cash: { amount: 0, people: 0 },
     total: { amount: 0, people: 0 }
   };
 
@@ -240,7 +241,7 @@ function validateEntryPayload(body) {
   const people = Number(body.people);
 
   if (!granularity) errors.push('录入粒度必须为 month 或 day');
-  if (!channel) errors.push('渠道必须为 wechat 或 alipay');
+  if (!channel) errors.push('渠道必须为 wechat、alipay 或 cash');
   if (!period) errors.push('周期格式与粒度不匹配');
   if (!Number.isFinite(amount) || amount <= 0) errors.push('收款金额必须为正数');
   if (!Number.isInteger(people) || people <= 0) errors.push('收款人数必须为正整数');
@@ -273,7 +274,7 @@ function validateImportPayload(body) {
   const channel = normalizeChannel(body.channel);
   const rows = Array.isArray(body.rows) ? body.rows : [];
 
-  if (!channel) errors.push('导入渠道必须为 wechat 或 alipay');
+  if (!channel) errors.push('导入渠道必须为 wechat、alipay 或 cash');
   if (rows.length === 0) errors.push('导入数据不能为空');
   if (rows.length > 500) errors.push('单次最多导入 500 行');
 
@@ -311,7 +312,7 @@ router.get('/', async (req, res, next) => {
     const parentPeriod = req.query.parentPeriod || '';
 
     if (req.query.granularity && !granularity) return fail(res, 400, '录入台账仅支持 month 或 day');
-    if (req.query.channel && !channel) return fail(res, 400, '渠道必须为 wechat 或 alipay');
+    if (req.query.channel && !channel) return fail(res, 400, '渠道必须为 wechat、alipay 或 cash');
     if (req.query.period && !period) return fail(res, 400, '周期格式与粒度不匹配');
     if (granularity && !validateParentPeriod(granularity, parentPeriod)) return fail(res, 400, '父级周期格式不正确');
 
@@ -346,7 +347,7 @@ router.get('/single', async (req, res, next) => {
     const period = normalizePeriod(granularity, req.query.period);
 
     if (!granularity) return fail(res, 400, '录入台账仅支持 month 或 day');
-    if (!channel) return fail(res, 400, '渠道必须为 wechat 或 alipay');
+    if (!channel) return fail(res, 400, '渠道必须为 wechat、alipay 或 cash');
     if (!period) return fail(res, 400, '周期格式与粒度不匹配');
 
     const receipts = await getSourceReceipts();
