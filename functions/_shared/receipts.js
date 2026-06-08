@@ -9,8 +9,8 @@ const PERIOD_PATTERNS = {
   day: /^\d{4}-(0[1-9]|1[0-2])-(0[1-9]|[12]\d|3[01])$/
 };
 
-const TABLE_SQL = `
-  CREATE TABLE IF NOT EXISTS receipts (
+const SCHEMA_SQL = [
+  `CREATE TABLE IF NOT EXISTS receipts (
     id TEXT PRIMARY KEY,
     channel TEXT NOT NULL,
     granularity TEXT NOT NULL,
@@ -21,10 +21,10 @@ const TABLE_SQL = `
     createdAt TEXT NOT NULL,
     updatedAt TEXT NOT NULL,
     UNIQUE(channel, granularity, period)
-  );
-  CREATE INDEX IF NOT EXISTS idx_receipts_granularity_period ON receipts (granularity, period);
-  CREATE INDEX IF NOT EXISTS idx_receipts_channel_period ON receipts (channel, period);
-`;
+  )`,
+  'CREATE INDEX IF NOT EXISTS idx_receipts_granularity_period ON receipts (granularity, period)',
+  'CREATE INDEX IF NOT EXISTS idx_receipts_channel_period ON receipts (channel, period)'
+];
 
 let initPromise;
 
@@ -311,7 +311,9 @@ function validateImportPayload(body) {
 }
 
 async function ensureSchema(db) {
-  await db.exec(TABLE_SQL);
+  for (const statement of SCHEMA_SQL) {
+    await db.exec(statement);
+  }
 }
 
 async function seedIfNeeded(db) {
