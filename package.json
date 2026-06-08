@@ -6,6 +6,7 @@
   "description": "商家收款数据统计管理H5系统",
   "scripts": {
     "install:all": "npm install --prefix server && npm install --prefix client",
+    "prebuild": "node scripts/ensure-client-deps.js",
     "db:start": "docker compose up -d mongo",
     "db:stop": "docker compose stop mongo",
     "db:inspect": "npm run db:inspect --prefix server",
