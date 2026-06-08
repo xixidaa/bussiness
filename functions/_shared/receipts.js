@@ -36,6 +36,22 @@ function fail(status, message) {
   return json(null, message, status, status);
 }
 
+export function requireDatabase(env) {
+  if (!env?.DB) {
+    return fail(500, 'D1 binding DB is not configured');
+  }
+
+  return env.DB;
+}
+
+export async function withErrorHandling(task) {
+  try {
+    return await task();
+  } catch (error) {
+    return fail(500, error?.message || 'Internal server error');
+  }
+}
+
 function normalizeChannel(value) {
   return CHANNELS.has(value) ? value : null;
 }

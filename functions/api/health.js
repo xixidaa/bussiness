@@ -1,5 +1,5 @@
-import { handleHealth } from '../_shared/receipts.js';
+import { handleHealth, withErrorHandling } from '../_shared/receipts.js';
 
 export async function onRequestGet() {
-  return handleHealth();
+  return withErrorHandling(() => handleHealth());
 }

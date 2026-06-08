@@ -1,6 +1,15 @@
-import { ensureDatabase, handleTrend } from '../../_shared/receipts.js';
+import {
+  ensureDatabase,
+  handleTrend,
+  requireDatabase,
+  withErrorHandling
+} from '../../_shared/receipts.js';
 
 export async function onRequestGet(context) {
-  await ensureDatabase(context.env.DB);
-  return handleTrend(context.env.DB, context.request);
+  return withErrorHandling(async () => {
+    const db = requireDatabase(context.env);
+    if (db instanceof Response) return db;
+    await ensureDatabase(db);
+    return handleTrend(db, context.request);
+  });
 }

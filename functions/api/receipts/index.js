@@ -1,11 +1,25 @@
-import { ensureDatabase, handleCreate, handleList } from '../../_shared/receipts.js';
+import {
+  ensureDatabase,
+  handleCreate,
+  handleList,
+  requireDatabase,
+  withErrorHandling
+} from '../../_shared/receipts.js';
 
 export async function onRequestGet(context) {
-  await ensureDatabase(context.env.DB);
-  return handleList(context.env.DB, context.request);
+  return withErrorHandling(async () => {
+    const db = requireDatabase(context.env);
+    if (db instanceof Response) return db;
+    await ensureDatabase(db);
+    return handleList(db, context.request);
+  });
 }
 
 export async function onRequestPost(context) {
-  await ensureDatabase(context.env.DB);
-  return handleCreate(context.env.DB, context.request);
+  return withErrorHandling(async () => {
+    const db = requireDatabase(context.env);
+    if (db instanceof Response) return db;
+    await ensureDatabase(db);
+    return handleCreate(db, context.request);
+  });
 }
