@@ -525,7 +525,8 @@ input {
 .record-meta strong,
 .record-meta span,
 .record-values label,
-.record-values strong {
+.record-values strong,
+.record-values small {
   display: block;
 }
 
@@ -566,6 +567,16 @@ input {
   text-overflow: clip;
   font-variant-numeric: tabular-nums;
   font-feature-settings: "tnum" 1, "lnum" 1;
+}
+
+.record-values small {
+  margin-top: 8px;
+  color: var(--text-soft);
+  font-size: 12px;
+}
+
+.record-value-secondary {
+  background: rgba(232, 239, 244, 0.84) !important;
 }
 
 .record-actions {

@@ -383,15 +383,29 @@ async function writeReceipts(db, receipts) {
 }
 
 function attachDerivedMonthFlags(receipts) {
-  const overriddenMonthKeys = new Set(
-    receipts
-      .filter((item) => item.granularity === 'day')
-      .map((item) => monthKey(item.channel, item.period.slice(0, 7)))
-  );
+  const dayMonthSummaryMap = new Map();
+
+  for (const item of receipts) {
+    if (item.granularity !== 'day') continue;
+
+    const key = monthKey(item.channel, item.period.slice(0, 7));
+    const current = dayMonthSummaryMap.get(key) || { amount: 0, people: 0 };
+    current.amount += Number(item.amount);
+    current.people += Number(item.people);
+    dayMonthSummaryMap.set(key, current);
+  }
 
   return receipts.map((item) => ({
     ...item,
-    isOverridden: item.granularity === 'month' && overriddenMonthKeys.has(monthKey(item.channel, item.period))
+    isOverridden: item.granularity === 'month' && dayMonthSummaryMap.has(monthKey(item.channel, item.period)),
+    effectiveAmount:
+      item.granularity === 'month' && dayMonthSummaryMap.has(monthKey(item.channel, item.period))
+        ? Math.round(dayMonthSummaryMap.get(monthKey(item.channel, item.period)).amount * 100) / 100
+        : null,
+    effectivePeople:
+      item.granularity === 'month' && dayMonthSummaryMap.has(monthKey(item.channel, item.period))
+        ? dayMonthSummaryMap.get(monthKey(item.channel, item.period)).people
+        : null
   }));
 }
 

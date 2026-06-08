@@ -373,13 +373,15 @@
                 </div>
 
                 <div class="record-values">
-                  <div>
-                    <label>收款金额</label>
-                    <strong>{{ money(item.amount) }}</strong>
+                  <div :class="{ 'record-value-secondary': item.isOverridden }">
+                    <label>{{ item.isOverridden ? '当前生效金额' : '收款金额' }}</label>
+                    <strong>{{ money(item.isOverridden ? item.effectiveAmount : item.amount) }}</strong>
+                    <small v-if="item.isOverridden">月录入值 {{ money(item.amount) }}</small>
                   </div>
-                  <div>
-                    <label>收款人数</label>
-                    <strong>{{ item.people }} 人</strong>
+                  <div :class="{ 'record-value-secondary': item.isOverridden }">
+                    <label>{{ item.isOverridden ? '当前生效人数' : '收款人数' }}</label>
+                    <strong>{{ item.isOverridden ? item.effectivePeople : item.people }} 人</strong>
+                    <small v-if="item.isOverridden">月录入值 {{ item.people }} 人</small>
                   </div>
                 </div>
 

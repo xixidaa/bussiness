@@ -317,21 +317,34 @@ router.get('/', async (req, res, next) => {
     if (granularity && !validateParentPeriod(granularity, parentPeriod)) return fail(res, 400, '父级周期格式不正确');
 
     const receipts = await getSourceReceipts();
-    const overriddenMonthKeys = new Set(
-      receipts
-        .filter((item) => item.granularity === 'day')
-        .map((item) => monthKey(item.channel, item.period.slice(0, 7)))
-    );
+    const dayMonthSummaryMap = new Map();
+
+    for (const item of receipts) {
+      if (item.granularity !== 'day') continue;
+
+      const key = monthKey(item.channel, item.period.slice(0, 7));
+      const current = dayMonthSummaryMap.get(key) || { amount: 0, people: 0 };
+      current.amount += Number(item.amount);
+      current.people += Number(item.people);
+      dayMonthSummaryMap.set(key, current);
+    }
 
     const result = receipts
       .filter((item) => (granularity ? item.granularity === granularity : true))
       .filter((item) => (period ? item.period === period : true))
       .filter((item) => (parentPeriod ? getParentPeriod(item.granularity, item.period) === parentPeriod : true))
       .filter((item) => (channel ? item.channel === channel : true))
-      .map((item) => ({
-        ...item,
-        isOverridden: item.granularity === 'month' && overriddenMonthKeys.has(monthKey(item.channel, item.period))
-      }))
+      .map((item) => {
+        const derivedMonth = dayMonthSummaryMap.get(monthKey(item.channel, item.period));
+        const isOverridden = item.granularity === 'month' && Boolean(derivedMonth);
+
+        return {
+          ...item,
+          isOverridden,
+          effectiveAmount: isOverridden ? Math.round(derivedMonth.amount * 100) / 100 : null,
+          effectivePeople: isOverridden ? derivedMonth.people : null
+        };
+      })
       .sort((left, right) => right.period.localeCompare(left.period) || right.updatedAt.localeCompare(left.updatedAt));
 
     ok(res, result);
