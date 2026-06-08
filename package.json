@@ -1,6 +1,7 @@
 {
   "name": "merchant-receipt-statistics",
   "version": "1.0.0",
+  "type": "module",
   "private": true,
   "description": "商家收款数据统计管理H5系统",
   "scripts": {

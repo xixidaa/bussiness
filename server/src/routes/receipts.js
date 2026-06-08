@@ -268,6 +268,41 @@ function hasDayDataForMonth(receipts, channel, monthPeriod, ignoreId = '') {
   );
 }
 
+function validateImportPayload(body) {
+  const errors = [];
+  const channel = normalizeChannel(body.channel);
+  const rows = Array.isArray(body.rows) ? body.rows : [];
+
+  if (!channel) errors.push('导入渠道必须为 wechat 或 alipay');
+  if (rows.length === 0) errors.push('导入数据不能为空');
+  if (rows.length > 500) errors.push('单次最多导入 500 行');
+
+  const seenPeriods = new Set();
+  const values = rows.map((row, index) => {
+    const rowNumber = index + 2;
+    const period = normalizePeriod('month', String(row.period || row.month || '').trim());
+    const amount = Number(row.amount);
+    const people = Number(row.people);
+
+    if (!period) errors.push(`第 ${rowNumber} 行月份格式应为 YYYY-MM`);
+    if (!Number.isFinite(amount) || amount <= 0) errors.push(`第 ${rowNumber} 行金额必须大于 0`);
+    if (!Number.isInteger(people) || people <= 0) errors.push(`第 ${rowNumber} 行人数必须为正整数`);
+    if (period && seenPeriods.has(period)) errors.push(`第 ${rowNumber} 行月份 ${period} 重复`);
+    if (period) seenPeriods.add(period);
+
+    return {
+      channel,
+      granularity: 'month',
+      period,
+      date: period ? buildDate('month', period) : null,
+      amount: Math.round(amount * 100) / 100,
+      people
+    };
+  });
+
+  return { errors, values };
+}
+
 router.get('/', async (req, res, next) => {
   try {
     const granularity = req.query.granularity ? normalizeGranularity(req.query.granularity, ENTRY_GRANULARITIES) : null;
@@ -399,6 +434,54 @@ router.post('/', async (req, res, next) => {
     receipts.push(receipt);
     await writeReceipts(receipts);
     ok(res, receipt, '新增成功');
+  } catch (error) {
+    next(error);
+  }
+});
+
+router.post('/import', async (req, res, next) => {
+  try {
+    const { errors, values } = validateImportPayload(req.body);
+    if (errors.length) return fail(res, 400, errors.join('；'));
+
+    const receipts = await getSourceReceipts();
+    const blocked = values.filter((item) => hasDayDataForMonth(receipts, item.channel, item.period));
+    if (blocked.length) {
+      return fail(res, 409, `以下月份已有日数据，不能导入月数据：${blocked.map((item) => item.period).join('、')}`);
+    }
+
+    const now = new Date().toISOString();
+    let created = 0;
+    let updated = 0;
+
+    for (const value of values) {
+      const index = receipts.findIndex(
+        (item) =>
+          item.channel === value.channel &&
+          item.granularity === value.granularity &&
+          item.period === value.period
+      );
+
+      if (index === -1) {
+        receipts.push({
+          id: nanoid(10),
+          ...value,
+          createdAt: now,
+          updatedAt: now
+        });
+        created += 1;
+      } else {
+        receipts[index] = {
+          ...receipts[index],
+          ...value,
+          updatedAt: now
+        };
+        updated += 1;
+      }
+    }
+
+    await writeReceipts(receipts);
+    ok(res, { created, updated, total: values.length }, '导入成功');
   } catch (error) {
     next(error);
   }

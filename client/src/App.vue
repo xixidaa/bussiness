@@ -50,12 +50,33 @@
 
             <div class="toolbar-group">
               <label>统计周期</label>
+              <el-select
+                v-if="analytics.dimension === 'year'"
+                v-model="analytics.years"
+                multiple
+                collapse-tags
+                collapse-tags-tooltip
+                :max-collapse-tags="2"
+                class="full-control"
+                placeholder="选择对比年份"
+                @change="handleYearSelectionChange"
+              >
+                <el-option
+                  v-for="item in analyticsYearOptions"
+                  :key="item.value"
+                  :label="item.label"
+                  :value="item.value"
+                />
+              </el-select>
               <el-date-picker
+                v-else
                 v-model="analytics.period"
                 :type="analyticsPicker.type"
                 :format="analyticsPicker.format"
                 :value-format="analyticsPicker.valueFormat"
                 :placeholder="analyticsPicker.placeholder"
+                :editable="false"
+                popper-class="mobile-picker-popper"
                 class="full-control"
                 @change="refreshAnalytics"
               />
@@ -67,7 +88,21 @@
             </div>
           </div>
 
-          <div class="compare-ribbon">
+          <div class="compare-ribbon" :class="{ 'year-ribbon': analytics.dimension === 'year' }">
+            <template v-if="analytics.dimension === 'year'">
+              <article
+                v-for="item in yearCompareCards"
+                :key="item.period"
+                class="compare-card"
+                :class="{ 'compare-card-alt': item.period === getCurrentPeriod('year') }"
+              >
+                <span>{{ formatPeriodLabel('year', item.period) }}</span>
+                <strong>{{ money(item.summary.total.amount) }}</strong>
+                <small>{{ item.summary.total.people }} 人 / 微信 {{ money(item.summary.wechat.amount) }} / 支付宝 {{ money(item.summary.alipay.amount) }}</small>
+              </article>
+            </template>
+
+            <template v-else>
             <article class="compare-card">
               <span>当前周期</span>
               <strong>{{ selectedPeriodLabel }}</strong>
@@ -103,6 +138,7 @@
                 }}
               </small>
             </article>
+            </template>
           </div>
         </section>
 
@@ -195,7 +231,17 @@
                 <h2>{{ editingId ? '编辑收款记录' : '录入收款记录' }}</h2>
                 <p>仅支持按月、按日录入。年数据自动汇总，月数据若存在日记录则由日汇总接管。</p>
               </div>
-              <el-button v-if="editingId" text type="primary" @click="resetForm()">取消编辑</el-button>
+              <div class="heading-actions">
+                <el-button v-if="editingId" text type="primary" @click="resetForm()">取消编辑</el-button>
+                <el-button :loading="importing" @click="triggerImport">Excel导入</el-button>
+                <input
+                  ref="importInput"
+                  type="file"
+                  accept=".xlsx,.xls,.csv"
+                  class="hidden-file-input"
+                  @change="handleImportFile"
+                />
+              </div>
             </div>
 
             <el-form ref="formRef" :model="form" :rules="rules" label-position="top" class="entry-form">
@@ -219,6 +265,8 @@
                     :format="formPicker.format"
                     :value-format="formPicker.valueFormat"
                     :placeholder="formPicker.placeholder"
+                    :editable="false"
+                    popper-class="mobile-picker-popper"
                     class="full-control"
                   />
                 </el-form-item>
@@ -268,6 +316,8 @@
                   :format="recordFilterPicker.format"
                   :value-format="recordFilterPicker.valueFormat"
                   :placeholder="recordFilterPicker.placeholder"
+                  :editable="false"
+                  popper-class="mobile-picker-popper"
                   clearable
                   class="full-control"
                   @change="refreshRecords"
@@ -361,6 +411,7 @@
 <script setup>
 import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue';
 import * as echarts from 'echarts';
+import * as XLSX from 'xlsx';
 import { ElMessage } from 'element-plus';
 import { receiptApi } from './api';
 
@@ -410,13 +461,20 @@ function createSummaryState() {
   };
 }
 
+function defaultCompareYears() {
+  const currentYear = new Date().getFullYear();
+  return [String(currentYear - 1), String(currentYear)];
+}
+
 const activeView = ref('analytics');
 const formRef = ref();
 const chartRef = ref();
+const importInput = ref();
 
 const analytics = reactive({
-  dimension: 'month',
-  period: getCurrentPeriod('month'),
+  dimension: 'year',
+  period: getCurrentPeriod('year'),
+  years: defaultCompareYears(),
   metric: 'amount'
 });
 
@@ -438,10 +496,12 @@ const summary = reactive(createSummaryState());
 const compareSummary = reactive(createSummaryState());
 
 const trendRows = ref([]);
+const yearCompareSummaries = ref([]);
 const records = ref([]);
 const analyticsLoading = ref(false);
 const recordsLoading = ref(false);
 const saving = ref(false);
+const importing = ref(false);
 const editingId = ref('');
 const pagination = reactive({
   currentPage: 1,
@@ -630,7 +690,27 @@ const detailHint = computed(() => {
   return `${analytics.period.slice(0, 7)} 的每日变化明细。`;
 });
 
-const detailRows = computed(() => [...trendRows.value].reverse());
+const detailRows = computed(() => [...visibleTrendRows.value].reverse());
+
+const analyticsYearOptions = computed(() => {
+  const years = new Set([...defaultCompareYears(), ...analytics.years, ...trendRows.value.map((item) => item.period)]);
+  return [...years]
+    .filter(Boolean)
+    .sort((left, right) => right.localeCompare(left))
+    .map((year) => ({ label: formatPeriodLabel('year', year), value: year }));
+});
+
+const selectedYearSet = computed(() => new Set(analytics.years));
+
+const visibleTrendRows = computed(() => {
+  if (analytics.dimension !== 'year') return trendRows.value;
+  return trendRows.value.filter((item) => selectedYearSet.value.has(item.period));
+});
+
+const yearCompareCards = computed(() =>
+  [...yearCompareSummaries.value]
+    .sort((left, right) => right.period.localeCompare(left.period))
+);
 
 const shareRows = computed(() => {
   const totalAmount = Number(summary.total.amount || 0);
@@ -718,6 +798,17 @@ function resetForm(preserveSelection = null) {
 
 function handleAnalyticsDimensionChange(nextValue) {
   analytics.period = getCurrentPeriod(nextValue);
+  if (nextValue === 'year' && analytics.years.length === 0) {
+    analytics.years = defaultCompareYears();
+  }
+  refreshAnalytics();
+}
+
+function handleYearSelectionChange() {
+  if (analytics.years.length === 0) {
+    analytics.years = defaultCompareYears();
+  }
+  analytics.period = analytics.years[analytics.years.length - 1] || getCurrentPeriod('year');
   refreshAnalytics();
 }
 
@@ -734,6 +825,33 @@ async function refreshAnalytics() {
   analyticsLoading.value = true;
 
   try {
+    if (analytics.dimension === 'year') {
+      const years = analytics.years.length ? analytics.years : defaultCompareYears();
+      const [trendData, ...summaryResults] = await Promise.all([
+        receiptApi.trend({ dimension: 'year' }),
+        ...years.map((year) => receiptApi.summary({ dimension: 'year', period: year }))
+      ]);
+
+      const summaries = years.map((year, index) => ({
+        period: year,
+        summary: summaryResults[index]?.summary || createSummaryState()
+      }));
+
+      yearCompareSummaries.value = summaries;
+      trendRows.value = Array.isArray(trendData) ? trendData : [];
+
+      const currentYearSummary = summaries.find((item) => item.period === getCurrentPeriod('year')) || summaries[summaries.length - 1];
+      const compareYearSummary = summaries.find((item) => item.period === String(Number(currentYearSummary?.period || 0) - 1)) || summaries[0];
+
+      assignSummary(summary, currentYearSummary?.summary);
+      assignSummary(compareSummary, compareYearSummary?.summary);
+
+      await nextTick();
+      await waitForPaint();
+      if (activeView.value === 'analytics') renderChart();
+      return;
+    }
+
     const [summaryData, compareData, trendData] = await Promise.all([
       receiptApi.summary({
         dimension: analytics.dimension,
@@ -779,6 +897,88 @@ async function refreshRecords() {
     ElMessage.error(error.message || '刷新台账失败');
   } finally {
     recordsLoading.value = false;
+  }
+}
+
+function triggerImport() {
+  importInput.value?.click();
+}
+
+function normalizeImportPeriod(value) {
+  if (value instanceof Date && !Number.isNaN(value.getTime())) {
+    return `${value.getFullYear()}-${pad(value.getMonth() + 1)}`;
+  }
+
+  if (typeof value === 'number') {
+    const parsed = XLSX.SSF.parse_date_code(value);
+    if (parsed?.y && parsed?.m) return `${parsed.y}-${pad(parsed.m)}`;
+  }
+
+  const text = String(value ?? '').trim();
+  const matched = text.match(/^(\d{4})[-/.年\s]*(\d{1,2})/);
+  if (!matched) return '';
+
+  const month = Number(matched[2]);
+  if (month < 1 || month > 12) return '';
+  return `${matched[1]}-${pad(month)}`;
+}
+
+function cellText(value) {
+  return String(value ?? '').trim();
+}
+
+function parseImportRows(sheetRows) {
+  const firstRow = sheetRows[0] || [];
+  const headers = firstRow.map(cellText);
+  const monthIndex = headers.findIndex((header) => /^(月份|月|month|period)$/i.test(header));
+  const amountIndex = headers.findIndex((header) => /^(金额|收款金额|amount)$/i.test(header));
+  const peopleIndex = headers.findIndex((header) => /^(人数|收款人数|people|count)$/i.test(header));
+  const hasHeader = monthIndex !== -1 || amountIndex !== -1 || peopleIndex !== -1;
+  const indexes = {
+    month: monthIndex === -1 ? 0 : monthIndex,
+    amount: amountIndex === -1 ? 1 : amountIndex,
+    people: peopleIndex === -1 ? 2 : peopleIndex
+  };
+
+  return sheetRows
+    .slice(hasHeader ? 1 : 0)
+    .filter((row) => row.some((cell) => cellText(cell)))
+    .map((row) => ({
+      period: normalizeImportPeriod(row[indexes.month]),
+      amount: Number(row[indexes.amount]),
+      people: Number(row[indexes.people])
+    }));
+}
+
+async function handleImportFile(event) {
+  const file = event.target.files?.[0];
+  event.target.value = '';
+  if (!file) return;
+
+  importing.value = true;
+  try {
+    const buffer = await file.arrayBuffer();
+    const workbook = XLSX.read(buffer, { type: 'array', cellDates: true });
+    const sheet = workbook.Sheets[workbook.SheetNames[0]];
+    const sheetRows = XLSX.utils.sheet_to_json(sheet, { header: 1, raw: true, defval: '' });
+    const rows = parseImportRows(sheetRows);
+
+    if (rows.length === 0) {
+      ElMessage.warning('没有可导入的数据');
+      return;
+    }
+
+    const result = await receiptApi.importRows({ channel: form.channel, rows });
+    ElMessage.success(`导入成功：新增 ${result.created} 条，更新 ${result.updated} 条`);
+
+    recordFilters.granularity = 'month';
+    recordFilters.period = getCurrentPeriod('year');
+    activeView.value = 'entry';
+    await Promise.all([refreshRecords(), refreshAnalytics()]);
+  } catch (error) {
+    ElMessage.error(error.message || '导入失败');
+  } finally {
+    importing.value = false;
   }
 }
 
@@ -865,10 +1065,11 @@ function renderChart() {
   }
 
   const unit = analytics.metric === 'amount' ? '元' : '人';
-  const xAxisData = trendRows.value.map((item) => item.period);
-  const wechatData = trendRows.value.map((item) => Number(item.summary?.wechat?.[analytics.metric] || 0));
-  const alipayData = trendRows.value.map((item) => Number(item.summary?.alipay?.[analytics.metric] || 0));
-  const totalData = trendRows.value.map((item) => Number(item.summary?.total?.[analytics.metric] || 0));
+  const chartRows = visibleTrendRows.value;
+  const xAxisData = chartRows.map((item) => item.period);
+  const wechatData = chartRows.map((item) => Number(item.summary?.wechat?.[analytics.metric] || 0));
+  const alipayData = chartRows.map((item) => Number(item.summary?.alipay?.[analytics.metric] || 0));
+  const totalData = chartRows.map((item) => Number(item.summary?.total?.[analytics.metric] || 0));
   const noData = xAxisData.length === 0;
 
   chartInstance.setOption(

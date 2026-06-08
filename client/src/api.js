@@ -35,6 +35,9 @@ export const receiptApi = {
   create(data) {
     return request.post('/receipts', data);
   },
+  importRows(data) {
+    return request.post('/receipts/import', data);
+  },
   update(id, data) {
     return request.put(`/receipts/${id}`, data);
   },
