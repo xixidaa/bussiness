@@ -10,18 +10,7 @@ const PERIOD_PATTERNS = {
 };
 
 const SCHEMA_SQL = [
-  `CREATE TABLE IF NOT EXISTS receipts (
-    id TEXT PRIMARY KEY,
-    channel TEXT NOT NULL,
-    granularity TEXT NOT NULL,
-    period TEXT NOT NULL,
-    date TEXT NOT NULL,
-    amount REAL NOT NULL,
-    people INTEGER NOT NULL,
-    createdAt TEXT NOT NULL,
-    updatedAt TEXT NOT NULL,
-    UNIQUE(channel, granularity, period)
-  )`,
+  'CREATE TABLE IF NOT EXISTS receipts (id TEXT PRIMARY KEY, channel TEXT NOT NULL, granularity TEXT NOT NULL, period TEXT NOT NULL, date TEXT NOT NULL, amount REAL NOT NULL, people INTEGER NOT NULL, createdAt TEXT NOT NULL, updatedAt TEXT NOT NULL, UNIQUE(channel, granularity, period))',
   'CREATE INDEX IF NOT EXISTS idx_receipts_granularity_period ON receipts (granularity, period)',
   'CREATE INDEX IF NOT EXISTS idx_receipts_channel_period ON receipts (channel, period)'
 ];
@@ -312,7 +301,7 @@ function validateImportPayload(body) {
 
 async function ensureSchema(db) {
   for (const statement of SCHEMA_SQL) {
-    await db.exec(statement);
+    await db.prepare(statement).run();
   }
 }
 
