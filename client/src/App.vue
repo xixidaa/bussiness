@@ -240,6 +240,7 @@
               </div>
               <div class="heading-actions">
                 <el-button v-if="editingId" text type="primary" @click="resetForm()">取消编辑</el-button>
+                <el-button tag="a" href="/receipt-import-template.csv" download="收款导入模板.csv">下载模板</el-button>
                 <el-button :loading="importing" @click="triggerImport">Excel导入</el-button>
                 <input
                   ref="importInput"
