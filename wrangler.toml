@@ -6,3 +6,13 @@ compatibility_date = "2026-06-08"
 binding = "DB"
 database_name = "merchant-receipt-statistics"
 database_id = "6c1556c0-4945-44a0-a451-0cd873806725"
+
+[[env.preview.d1_databases]]
+binding = "DB"
+database_name = "merchant-receipt-statistics"
+database_id = "6c1556c0-4945-44a0-a451-0cd873806725"
+
+[[env.production.d1_databases]]
+binding = "DB"
+database_name = "merchant-receipt-statistics"
+database_id = "6c1556c0-4945-44a0-a451-0cd873806725"
