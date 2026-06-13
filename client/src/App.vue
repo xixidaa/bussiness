@@ -22,7 +22,7 @@
           <span>{{ item.desc }}</span>
         </button>
 
-        <div class="user-panel" v-loading="usersLoading">
+        <div class="user-panel" v-loading="usersLoading" element-loading-text="正在加载用户，请稍后...">
           <div class="user-panel-heading">
             <span>当前用户</span>
             <strong>{{ currentUserName }}</strong>
@@ -48,7 +48,12 @@
     </header>
 
     <main class="workspace">
-      <section v-if="activeView === 'analytics'" v-loading="analyticsLoading" class="analytics-page">
+      <section
+        v-if="activeView === 'analytics'"
+        v-loading="analyticsLoading"
+        element-loading-text="正在加载首页数据，请稍后..."
+        class="analytics-page"
+      >
         <section class="panel filter-panel">
           <div class="section-heading">
             <div>
@@ -121,6 +126,7 @@
               >
                 <span>{{ formatPeriodLabel('year', item.period) }}</span>
                 <strong>{{ money(item.summary.total.amount) }}</strong>
+                <small>客单价 {{ formatAverage(averageFromSummary(item.summary)) }}</small>
                 <small>{{ item.summary.total.people }} 人 / 微信 {{ money(item.summary.wechat.amount) }} / 支付宝 {{ money(item.summary.alipay.amount) }} / 现金 {{ money(item.summary.cash.amount) }}</small>
               </article>
             </template>
@@ -129,12 +135,14 @@
             <article class="compare-card">
               <span>当前周期</span>
               <strong>{{ selectedPeriodLabel }}</strong>
+              <small>客单价 {{ averagePerPerson }}</small>
               <small>{{ money(summary.total.amount) }} / {{ summary.total.people }} 人</small>
             </article>
 
             <article class="compare-card compare-card-alt">
               <span>{{ compareAnchorLabel }}</span>
               <strong>{{ comparePeriodLabel }}</strong>
+              <small>客单价 {{ compareAveragePerPerson }}</small>
               <small>{{ money(compareSummary.total.amount) }} / {{ compareSummary.total.people }} 人</small>
             </article>
 
@@ -160,6 +168,13 @@
                       : '人数更低'
                 }}
               </small>
+            </article>
+            <article class="compare-card compare-card-delta">
+              <span>客单价差值</span>
+              <strong :class="deltaClass(comparisonDelta.average)">
+                {{ formatAverageDelta(comparisonDelta.average) }}
+              </strong>
+              <small>{{ compareRuleText }}</small>
             </article>
             </template>
           </div>
@@ -245,6 +260,7 @@
                   <span>支付宝 {{ money(item.summary.alipay.amount) }}</span>
                   <span>现金 {{ money(item.summary.cash.amount) }}</span>
                   <span>{{ item.summary.total.people }} 人</span>
+                  <span>客单价 {{ formatAverage(averageFromSummary(item.summary)) }}</span>
                 </div>
               </article>
             </div>
@@ -253,7 +269,11 @@
       </section>
 
       <section v-else class="entry-page">
-        <section class="panel ledger-panel" v-loading="recordsLoading">
+        <section
+          class="panel ledger-panel"
+          v-loading="recordsLoading"
+          element-loading-text="正在加载台账，请稍后..."
+        >
           <div class="section-heading ledger-heading">
             <div>
               <span class="section-kicker">Records</span>
@@ -678,6 +698,16 @@ function moneyPlain(value) {
   });
 }
 
+function averageFromAmountPeople(amount, people) {
+  const normalizedPeople = Number(people || 0);
+  if (!normalizedPeople) return 0;
+  return Number(amount || 0) / normalizedPeople;
+}
+
+function averageFromSummary(summaryItem) {
+  return averageFromAmountPeople(summaryItem?.total?.amount, summaryItem?.total?.people);
+}
+
 function formatPeriodLabel(granularity, period) {
   if (!period) return '--';
   if (granularity === 'year') return `${period} 年`;
@@ -720,6 +750,15 @@ function formatPeopleDelta(value) {
   return `${prefix}${Math.abs(value)} 人`;
 }
 
+function formatAverage(value) {
+  return `${money(value)} / 人`;
+}
+
+function formatAverageDelta(value) {
+  const prefix = value > 0 ? '+' : value < 0 ? '-' : '';
+  return `${prefix}${money(Math.abs(value))} / 人`;
+}
+
 function waitForPaint() {
   return new Promise((resolve) => {
     requestAnimationFrame(() => {
@@ -751,13 +790,15 @@ const compareRuleText = computed(() => {
 
 const comparisonDelta = computed(() => ({
   amount: Number(summary.total.amount) - Number(compareSummary.total.amount),
-  people: Number(summary.total.people) - Number(compareSummary.total.people)
+  people: Number(summary.total.people) - Number(compareSummary.total.people),
+  average: averageFromSummary(summary) - averageFromSummary(compareSummary)
 }));
 
 const averagePerPerson = computed(() => {
-  if (!summary.total.people) return '¥0.00 / 人';
-  return `${money(summary.total.amount / summary.total.people)} / 人`;
+  return formatAverage(averageFromSummary(summary));
 });
+
+const compareAveragePerPerson = computed(() => formatAverage(averageFromSummary(compareSummary)));
 
 const trendScopeText = computed(() => {
   if (analytics.dimension === 'year') {
