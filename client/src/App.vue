@@ -3,9 +3,9 @@
     <header class="hero-banner">
       <div class="hero-copy">
         <span class="hero-badge">Merchant Revenue Studio</span>
-        <h1>商家收款数据统计管理</h1>
+        <h1>商家收款数据统计</h1>
         <p>
-          年度统计由有效月数据自动汇总，月度统计优先采用日数据回推。我们把录入与统计拆开，让台账维护、收入对比和趋势查看都更直观。
+          年度统计由有效月数据自动汇总，月度统计优先采用日数据回推。
         </p>
       </div>
 
@@ -322,6 +322,11 @@
             </div>
 
             <div class="toolbar-group">
+              <label>导入渠道</label>
+              <el-segmented v-model="importChannel" :options="channelOptions" />
+            </div>
+
+            <div class="toolbar-group">
               <label>渠道筛选</label>
               <el-segmented
                 v-model="recordFilters.channel"
@@ -330,10 +335,6 @@
               />
             </div>
 
-            <div class="toolbar-group">
-              <label>导入渠道</label>
-              <el-segmented v-model="importChannel" :options="channelOptions" />
-            </div>
           </div>
 
           <div class="ledger-summary">
