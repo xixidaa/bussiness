@@ -115,6 +115,42 @@ input {
   background: rgba(255, 250, 243, 0.72);
 }
 
+.user-panel {
+  display: grid;
+  gap: 12px;
+  padding: 16px;
+  border-radius: 18px;
+  background: rgba(255, 255, 255, 0.82);
+  box-shadow: inset 0 0 0 1px rgba(144, 164, 182, 0.14);
+}
+
+.user-panel-heading {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.user-panel-heading span {
+  color: var(--text-faint);
+  font-size: 13px;
+}
+
+.user-panel-heading strong {
+  min-width: 0;
+  font-size: 18px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.user-panel-controls {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: center;
+}
+
 .view-chip {
   width: 100%;
   border: 0;
@@ -440,10 +476,22 @@ input {
   gap: 10px 16px;
 }
 
-.entry-grid {
+.entry-page {
   display: grid;
-  grid-template-columns: 460px minmax(0, 1fr);
   gap: 18px;
+}
+
+.ledger-heading {
+  align-items: center;
+}
+
+.ledger-actions {
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.ledger-toolbar {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
 }
 
 .entry-form-grid {
@@ -587,7 +635,6 @@ input {
 }
 
 .full-control,
-.submit-btn,
 .el-segmented {
   width: 100%;
 }
@@ -596,8 +643,29 @@ input {
   display: none;
 }
 
-.submit-btn {
-  margin-top: 6px;
+.entry-dialog .el-dialog {
+  border-radius: 22px;
+}
+
+.user-dialog.el-dialog {
+  border-radius: 22px;
+}
+
+.entry-dialog .el-dialog__header {
+  padding-bottom: 6px;
+}
+
+.dialog-helper {
+  margin: 0 0 18px;
+  color: var(--text-soft);
+  font-size: 14px;
+  line-height: 1.65;
+}
+
+.dialog-footer-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
 }
 
 .filter-panel {
@@ -656,10 +724,6 @@ input {
     grid-template-columns: 1fr;
   }
 
-  .entry-grid {
-    grid-template-columns: 1fr;
-  }
-
   .record-card {
     grid-template-columns: 1fr;
   }
@@ -710,6 +774,7 @@ input {
 @media (max-width: 820px) {
   .toolbar-grid,
   .compare-ribbon,
+  .ledger-toolbar,
   .entry-form-grid,
   .ledger-summary,
   .record-values {
@@ -749,6 +814,27 @@ input {
     flex-wrap: wrap;
   }
 
+  .ledger-actions {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .user-panel-controls {
+    grid-template-columns: 1fr;
+  }
+
+  .user-panel-controls .el-button {
+    width: 100%;
+    min-height: 42px;
+  }
+
+  .ledger-actions .el-button,
+  .ledger-actions .el-button + .el-button {
+    width: 100%;
+    min-height: 42px;
+    margin-left: 0;
+  }
+
   .mobile-picker-popper {
     max-width: calc(100vw - 20px);
   }
@@ -779,5 +865,53 @@ input {
   .ledger-summary strong,
   .record-values strong {
     font-size: 24px;
+  }
+
+  .record-card {
+    padding: 16px;
+    border-radius: 18px;
+  }
+
+  .record-actions {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    width: 100%;
+  }
+
+  .record-actions .el-button,
+  .record-actions .el-button + .el-button {
+    width: 100%;
+    min-height: 42px;
+    margin-left: 0;
+  }
+
+  .entry-dialog.el-dialog {
+    width: calc(100vw - 20px) !important;
+    max-height: calc(100vh - 20px);
+    margin: 10px auto !important;
+    display: flex;
+    flex-direction: column;
+  }
+
+  .user-dialog.el-dialog {
+    width: calc(100vw - 20px) !important;
+    margin: 10px auto !important;
+  }
+
+  .entry-dialog .el-dialog__body {
+    overflow: auto;
+    padding-top: 8px;
+  }
+
+  .dialog-footer-actions {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .dialog-footer-actions .el-button,
+  .dialog-footer-actions .el-button + .el-button {
+    width: 100%;
+    min-height: 42px;
+    margin-left: 0;
   }
 }

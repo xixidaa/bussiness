@@ -1,6 +1,6 @@
 import express from 'express';
 import { nanoid } from 'nanoid';
-import { readReceipts, writeReceipts } from '../storage.js';
+import { DEFAULT_USER, readReceipts, writeReceipts } from '../storage.js';
 
 const router = express.Router();
 
@@ -15,6 +15,15 @@ const PERIOD_PATTERNS = {
 
 const ok = (res, data = null, message = 'success') => res.json({ code: 0, message, data });
 const fail = (res, status, message) => res.status(status).json({ code: status, message, data: null });
+
+function normalizeUserId(value) {
+  const text = String(value || '').trim();
+  return /^[a-zA-Z0-9_-]{2,32}$/.test(text) ? text : DEFAULT_USER.id;
+}
+
+function getCurrentUserId(req) {
+  return normalizeUserId(req.get('x-user-id') || req.query.userId || DEFAULT_USER.id);
+}
 
 function normalizeChannel(value) {
   return CHANNELS.has(value) ? value : null;
@@ -58,6 +67,7 @@ function normalizeReceipt(item) {
 
   return {
     id: item.id,
+    userId: normalizeUserId(item.userId),
     channel,
     granularity,
     period,
@@ -75,6 +85,18 @@ async function getSourceReceipts() {
     .map(normalizeReceipt)
     .filter(Boolean)
     .filter((item) => item.granularity === 'month' || item.granularity === 'day');
+}
+
+async function getUserReceipts(userId) {
+  const receipts = await getSourceReceipts();
+  return receipts.filter((item) => item.userId === userId);
+}
+
+function mergeUserReceipts(allReceipts, userId, userReceipts) {
+  return [
+    ...allReceipts.filter((item) => item.userId !== userId),
+    ...userReceipts.map((item) => ({ ...item, userId }))
+  ];
 }
 
 function monthKey(channel, period) {
@@ -306,6 +328,7 @@ function validateImportPayload(body) {
 
 router.get('/', async (req, res, next) => {
   try {
+    const userId = getCurrentUserId(req);
     const granularity = req.query.granularity ? normalizeGranularity(req.query.granularity, ENTRY_GRANULARITIES) : null;
     const channel = req.query.channel ? normalizeChannel(req.query.channel) : null;
     const period = granularity && req.query.period ? normalizePeriod(granularity, req.query.period) : null;
@@ -316,7 +339,7 @@ router.get('/', async (req, res, next) => {
     if (req.query.period && !period) return fail(res, 400, '周期格式与粒度不匹配');
     if (granularity && !validateParentPeriod(granularity, parentPeriod)) return fail(res, 400, '父级周期格式不正确');
 
-    const receipts = await getSourceReceipts();
+    const receipts = await getUserReceipts(userId);
     const dayMonthSummaryMap = new Map();
 
     for (const item of receipts) {
@@ -355,6 +378,7 @@ router.get('/', async (req, res, next) => {
 
 router.get('/single', async (req, res, next) => {
   try {
+    const userId = getCurrentUserId(req);
     const granularity = normalizeGranularity(req.query.granularity, ENTRY_GRANULARITIES);
     const channel = normalizeChannel(req.query.channel);
     const period = normalizePeriod(granularity, req.query.period);
@@ -363,7 +387,7 @@ router.get('/single', async (req, res, next) => {
     if (!channel) return fail(res, 400, '渠道必须为 wechat、alipay 或 cash');
     if (!period) return fail(res, 400, '周期格式与粒度不匹配');
 
-    const receipts = await getSourceReceipts();
+    const receipts = await getUserReceipts(userId);
     const result = receipts
       .filter((item) => item.granularity === granularity)
       .filter((item) => item.channel === channel)
@@ -378,13 +402,14 @@ router.get('/single', async (req, res, next) => {
 
 router.get('/summary', async (req, res, next) => {
   try {
+    const userId = getCurrentUserId(req);
     const dimension = normalizeGranularity(req.query.dimension || 'month');
     const period = req.query.period ? normalizePeriod(dimension, req.query.period) : null;
 
     if (!dimension) return fail(res, 400, '统计粒度必须为 year、month 或 day');
     if (req.query.period && !period) return fail(res, 400, '周期格式与粒度不匹配');
 
-    const receipts = await getSourceReceipts();
+    const receipts = await getUserReceipts(userId);
     const records = getRecordsForDimension(receipts, dimension);
     const scoped = records.filter((item) => (period ? item.period === period : true));
 
@@ -400,13 +425,14 @@ router.get('/summary', async (req, res, next) => {
 
 router.get('/trend', async (req, res, next) => {
   try {
+    const userId = getCurrentUserId(req);
     const dimension = normalizeGranularity(req.query.dimension || 'month');
     const parentPeriod = req.query.parentPeriod || '';
 
     if (!dimension) return fail(res, 400, '统计粒度必须为 year、month 或 day');
     if (!validateParentPeriod(dimension, parentPeriod)) return fail(res, 400, '父级周期格式不正确');
 
-    const receipts = await getSourceReceipts();
+    const receipts = await getUserReceipts(userId);
     const records = getRecordsForDimension(receipts, dimension)
       .filter((item) => (parentPeriod ? getParentPeriod(dimension, item.period) === parentPeriod : true));
 
@@ -418,10 +444,12 @@ router.get('/trend', async (req, res, next) => {
 
 router.post('/', async (req, res, next) => {
   try {
+    const userId = getCurrentUserId(req);
     const { errors, value } = validateEntryPayload(req.body);
     if (errors.length) return fail(res, 400, errors.join('；'));
 
-    const receipts = await getSourceReceipts();
+    const allReceipts = await getSourceReceipts();
+    const receipts = allReceipts.filter((item) => item.userId === userId);
     const duplicated = receipts.find(
       (item) =>
         item.channel === value.channel &&
@@ -440,13 +468,14 @@ router.post('/', async (req, res, next) => {
     const now = new Date().toISOString();
     const receipt = {
       id: nanoid(10),
+      userId,
       ...value,
       createdAt: now,
       updatedAt: now
     };
 
     receipts.push(receipt);
-    await writeReceipts(receipts);
+    await writeReceipts(mergeUserReceipts(allReceipts, userId, receipts));
     ok(res, receipt, '新增成功');
   } catch (error) {
     next(error);
@@ -455,10 +484,12 @@ router.post('/', async (req, res, next) => {
 
 router.post('/import', async (req, res, next) => {
   try {
+    const userId = getCurrentUserId(req);
     const { errors, values } = validateImportPayload(req.body);
     if (errors.length) return fail(res, 400, errors.join('；'));
 
-    const receipts = await getSourceReceipts();
+    const allReceipts = await getSourceReceipts();
+    const receipts = allReceipts.filter((item) => item.userId === userId);
     const blocked = values.filter((item) => hasDayDataForMonth(receipts, item.channel, item.period));
     if (blocked.length) {
       return fail(res, 409, `以下月份已有日数据，不能导入月数据：${blocked.map((item) => item.period).join('、')}`);
@@ -479,6 +510,7 @@ router.post('/import', async (req, res, next) => {
       if (index === -1) {
         receipts.push({
           id: nanoid(10),
+          userId,
           ...value,
           createdAt: now,
           updatedAt: now
@@ -494,7 +526,7 @@ router.post('/import', async (req, res, next) => {
       }
     }
 
-    await writeReceipts(receipts);
+    await writeReceipts(mergeUserReceipts(allReceipts, userId, receipts));
     ok(res, { created, updated, total: values.length }, '导入成功');
   } catch (error) {
     next(error);
@@ -503,10 +535,12 @@ router.post('/import', async (req, res, next) => {
 
 router.put('/:id', async (req, res, next) => {
   try {
+    const userId = getCurrentUserId(req);
     const { errors, value } = validateEntryPayload(req.body);
     if (errors.length) return fail(res, 400, errors.join('；'));
 
-    const receipts = await getSourceReceipts();
+    const allReceipts = await getSourceReceipts();
+    const receipts = allReceipts.filter((item) => item.userId === userId);
     const index = receipts.findIndex((item) => item.id === req.params.id);
     if (index === -1) return fail(res, 404, '数据不存在');
 
@@ -532,7 +566,7 @@ router.put('/:id', async (req, res, next) => {
       updatedAt: new Date().toISOString()
     };
 
-    await writeReceipts(receipts);
+    await writeReceipts(mergeUserReceipts(allReceipts, userId, receipts));
     ok(res, receipts[index], '修改成功');
   } catch (error) {
     next(error);
@@ -541,11 +575,13 @@ router.put('/:id', async (req, res, next) => {
 
 router.delete('/:id', async (req, res, next) => {
   try {
-    const receipts = await getSourceReceipts();
+    const userId = getCurrentUserId(req);
+    const allReceipts = await getSourceReceipts();
+    const receipts = allReceipts.filter((item) => item.userId === userId);
     const nextReceipts = receipts.filter((item) => item.id !== req.params.id);
     if (nextReceipts.length === receipts.length) return fail(res, 404, '数据不存在');
 
-    await writeReceipts(nextReceipts);
+    await writeReceipts(mergeUserReceipts(allReceipts, userId, nextReceipts));
     ok(res, { id: req.params.id }, '删除成功');
   } catch (error) {
     next(error);

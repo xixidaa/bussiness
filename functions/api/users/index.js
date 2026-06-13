@@ -1,25 +1,25 @@
 import {
   ensureDatabase,
-  handleDelete,
-  handleUpdate,
+  handleUsersCreate,
+  handleUsersList,
   requireDatabase,
   withErrorHandling
 } from '../../_shared/receipts.js';
 
-export async function onRequestPut(context) {
+export async function onRequestGet(context) {
   return withErrorHandling(async () => {
     const db = requireDatabase(context.env);
     if (db instanceof Response) return db;
     await ensureDatabase(db);
-    return handleUpdate(db, context.request, context.params.id);
+    return handleUsersList(db);
   });
 }
 
-export async function onRequestDelete(context) {
+export async function onRequestPost(context) {
   return withErrorHandling(async () => {
     const db = requireDatabase(context.env);
     if (db instanceof Response) return db;
     await ensureDatabase(db);
-    return handleDelete(db, context.request, context.params.id);
+    return handleUsersCreate(db, context.request);
   });
 }

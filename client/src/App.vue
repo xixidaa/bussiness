@@ -21,11 +21,34 @@
           <strong>{{ item.label }}</strong>
           <span>{{ item.desc }}</span>
         </button>
+
+        <div class="user-panel" v-loading="usersLoading">
+          <div class="user-panel-heading">
+            <span>当前用户</span>
+            <strong>{{ currentUserName }}</strong>
+          </div>
+          <div class="user-panel-controls">
+            <el-select
+              v-model="currentUserId"
+              class="full-control"
+              placeholder="选择用户"
+              @change="handleUserChange"
+            >
+              <el-option
+                v-for="item in users"
+                :key="item.id"
+                :label="item.name"
+                :value="item.id"
+              />
+            </el-select>
+            <el-button @click="openUserDialog">新增用户</el-button>
+          </div>
+        </div>
       </div>
     </header>
 
     <main class="workspace">
-      <section v-if="activeView === 'analytics'" class="analytics-page">
+      <section v-if="activeView === 'analytics'" v-loading="analyticsLoading" class="analytics-page">
         <section class="panel filter-panel">
           <div class="section-heading">
             <div>
@@ -230,191 +253,224 @@
       </section>
 
       <section v-else class="entry-page">
-        <div class="entry-grid">
-          <section class="panel entry-form-panel">
-            <div class="section-heading">
-              <div>
-                <span class="section-kicker">Ledger</span>
-                <h2>{{ editingId ? '编辑收款记录' : '录入收款记录' }}</h2>
-                <p>仅支持按月、按日录入。年数据自动汇总，月数据若存在日记录则由日汇总接管。</p>
-              </div>
-              <div class="heading-actions">
-                <el-button v-if="editingId" text type="primary" @click="resetForm()">取消编辑</el-button>
-                <el-button tag="a" href="/receipt-import-template.csv" download="收款导入模板.csv">下载模板</el-button>
-                <el-button :loading="importing" @click="triggerImport">Excel导入</el-button>
-                <input
-                  ref="importInput"
-                  type="file"
-                  accept=".xlsx,.xls,.csv"
-                  class="hidden-file-input"
-                  @change="handleImportFile"
-                />
-              </div>
+        <section class="panel ledger-panel" v-loading="recordsLoading">
+          <div class="section-heading ledger-heading">
+            <div>
+              <span class="section-kicker">Records</span>
+              <h2>录入台账</h2>
+              <p>月台账按年份筛选，日台账按月份筛选。新增与编辑记录在弹窗中完成，列表始终作为默认工作区。</p>
+            </div>
+            <div class="heading-actions ledger-actions">
+              <el-button type="primary" @click="openCreateDialog">新增记录</el-button>
+              <el-button tag="a" href="/receipt-import-template.csv" download="收款导入模板.csv">下载模板</el-button>
+              <el-button :loading="importing" @click="triggerImport">Excel导入</el-button>
+              <el-button :loading="recordsLoading" @click="refreshRecords">刷新列表</el-button>
+              <input
+                ref="importInput"
+                type="file"
+                accept=".xlsx,.xls,.csv"
+                class="hidden-file-input"
+                @change="handleImportFile"
+              />
+            </div>
+          </div>
+
+          <div class="toolbar-grid compact-grid ledger-toolbar">
+            <div class="toolbar-group">
+              <label>筛选粒度</label>
+              <el-segmented
+                v-model="recordFilters.granularity"
+                :options="entryGranularityOptions"
+                @change="handleRecordGranularityChange"
+              />
             </div>
 
-            <el-form ref="formRef" :model="form" :rules="rules" label-position="top" class="entry-form">
-              <el-form-item label="录入粒度" prop="granularity">
-                <el-segmented
-                  v-model="form.granularity"
-                  :options="entryGranularityOptions"
-                  @change="handleFormGranularityChange"
+            <div class="toolbar-group">
+              <label>{{ recordFilterPeriodLabel }}</label>
+              <el-date-picker
+                v-model="recordFilters.period"
+                :type="recordFilterPicker.type"
+                :format="recordFilterPicker.format"
+                :value-format="recordFilterPicker.valueFormat"
+                :placeholder="recordFilterPicker.placeholder"
+                :editable="false"
+                popper-class="mobile-picker-popper"
+                clearable
+                class="full-control"
+                @change="refreshRecords"
+              />
+            </div>
+
+            <div class="toolbar-group">
+              <label>渠道筛选</label>
+              <el-segmented
+                v-model="recordFilters.channel"
+                :options="channelFilterOptions"
+                @change="refreshRecords"
+              />
+            </div>
+
+            <div class="toolbar-group">
+              <label>导入渠道</label>
+              <el-segmented v-model="importChannel" :options="channelOptions" />
+            </div>
+          </div>
+
+          <div class="ledger-summary">
+            <div>
+              <strong>{{ records.length }}</strong>
+              <span>条记录</span>
+            </div>
+            <div>
+              <strong>{{ money(recordTotalAmount) }}</strong>
+              <span>筛选后金额</span>
+            </div>
+            <div>
+              <strong>{{ recordTotalPeople }}</strong>
+              <span>筛选后人数</span>
+            </div>
+          </div>
+
+          <el-empty v-if="!recordsLoading && records.length === 0" description="当前筛选条件下暂无数据" />
+          <div v-else class="record-list">
+            <article v-for="item in pagedRecords" :key="item.id" class="record-card">
+              <div class="record-meta">
+                <div class="record-badges">
+                  <el-tag round>{{ granularityText(item.granularity) }}</el-tag>
+                  <el-tag round :type="item.channel === 'wechat' ? 'success' : item.channel === 'alipay' ? 'primary' : 'warning'">
+                    {{ channelText(item.channel) }}
+                  </el-tag>
+                  <el-tag v-if="item.isOverridden" round type="warning">已被日汇总覆盖</el-tag>
+                </div>
+                <strong>{{ formatPeriodLabel(item.granularity, item.period) }}</strong>
+                <span>创建于 {{ formatCreatedAt(item.createdAt) }}</span>
+              </div>
+
+              <div class="record-values">
+                <div :class="{ 'record-value-secondary': item.isOverridden }">
+                  <label>{{ item.isOverridden ? '当前生效金额' : '收款金额' }}</label>
+                  <strong>{{ money(item.isOverridden ? item.effectiveAmount : item.amount) }}</strong>
+                  <small v-if="item.isOverridden">月录入值 {{ money(item.amount) }}</small>
+                </div>
+                <div :class="{ 'record-value-secondary': item.isOverridden }">
+                  <label>{{ item.isOverridden ? '当前生效人数' : '收款人数' }}</label>
+                  <strong>{{ item.isOverridden ? item.effectivePeople : item.people }} 人</strong>
+                  <small v-if="item.isOverridden">月录入值 {{ item.people }} 人</small>
+                </div>
+              </div>
+
+              <div class="record-actions">
+                <el-button text type="primary" @click="startEdit(item)">编辑</el-button>
+                <el-popconfirm
+                  title="确认删除这条记录吗？"
+                  confirm-button-text="删除"
+                  cancel-button-text="取消"
+                  @confirm="deleteItem(item.id)"
+                >
+                  <template #reference>
+                    <el-button text type="danger">删除</el-button>
+                  </template>
+                </el-popconfirm>
+              </div>
+            </article>
+          </div>
+
+          <div v-if="records.length > pagination.pageSize" class="pagination-wrap">
+            <el-pagination
+              v-model:current-page="pagination.currentPage"
+              v-model:page-size="pagination.pageSize"
+              background
+              layout="prev, pager, next"
+              :total="records.length"
+              :pager-count="5"
+            />
+          </div>
+        </section>
+
+        <el-dialog
+          v-model="entryDialogVisible"
+          :title="entryDialogTitle"
+          width="min(92vw, 640px)"
+          class="entry-dialog"
+          destroy-on-close
+          :close-on-click-modal="!saving"
+          :close-on-press-escape="!saving"
+          @closed="handleEntryDialogClosed"
+        >
+          <p class="dialog-helper">仅支持按月、按日录入。年数据自动汇总，月数据若存在日记录则由日汇总接管。</p>
+
+          <el-form ref="formRef" :model="form" :rules="rules" label-position="top" class="entry-form">
+            <el-form-item label="录入粒度" prop="granularity">
+              <el-segmented
+                v-model="form.granularity"
+                :options="entryGranularityOptions"
+                @change="handleFormGranularityChange"
+              />
+            </el-form-item>
+
+            <div class="entry-form-grid">
+              <el-form-item label="收款渠道" prop="channel">
+                <el-segmented v-model="form.channel" :options="channelOptions" />
+              </el-form-item>
+
+              <el-form-item label="录入周期" prop="period">
+                <el-date-picker
+                  v-model="form.period"
+                  :type="formPicker.type"
+                  :format="formPicker.format"
+                  :value-format="formPicker.valueFormat"
+                  :placeholder="formPicker.placeholder"
+                  :editable="false"
+                  popper-class="mobile-picker-popper"
+                  class="full-control"
                 />
               </el-form-item>
 
-              <div class="entry-form-grid">
-                <el-form-item label="收款渠道" prop="channel">
-                  <el-segmented v-model="form.channel" :options="channelOptions" />
-                </el-form-item>
+              <el-form-item label="收款金额" prop="amount">
+                <el-input v-model="form.amount" inputmode="decimal" placeholder="请输入收款金额">
+                  <template #prefix>¥</template>
+                </el-input>
+              </el-form-item>
 
-                <el-form-item label="录入周期" prop="period">
-                  <el-date-picker
-                    v-model="form.period"
-                    :type="formPicker.type"
-                    :format="formPicker.format"
-                    :value-format="formPicker.valueFormat"
-                    :placeholder="formPicker.placeholder"
-                    :editable="false"
-                    popper-class="mobile-picker-popper"
-                    class="full-control"
-                  />
-                </el-form-item>
+              <el-form-item label="收款人数" prop="people">
+                <el-input v-model="form.people" inputmode="numeric" placeholder="请输入收款人数" />
+              </el-form-item>
+            </div>
+          </el-form>
 
-                <el-form-item label="收款金额" prop="amount">
-                  <el-input v-model="form.amount" inputmode="decimal" placeholder="请输入收款金额">
-                    <template #prefix>¥</template>
-                  </el-input>
-                </el-form-item>
-
-                <el-form-item label="收款人数" prop="people">
-                  <el-input v-model="form.people" inputmode="numeric" placeholder="请输入收款人数" />
-                </el-form-item>
-              </div>
-
-              <el-button type="primary" size="large" class="submit-btn" :loading="saving" @click="submitForm">
+          <template #footer>
+            <div class="dialog-footer-actions">
+              <el-button :disabled="saving" @click="closeEntryDialog">取消</el-button>
+              <el-button type="primary" :loading="saving" @click="submitForm">
                 {{ editingId ? '保存修改' : '写入记录' }}
               </el-button>
-            </el-form>
-          </section>
-
-          <section class="panel ledger-panel">
-            <div class="section-heading">
-              <div>
-                <span class="section-kicker">Records</span>
-                <h2>录入台账</h2>
-                <p>月台账按年份筛选，日台账按月份筛选，方便在同一层级内查看录入结果。</p>
-              </div>
-              <el-button :loading="recordsLoading" @click="refreshRecords">刷新列表</el-button>
             </div>
-
-            <div class="toolbar-grid compact-grid">
-              <div class="toolbar-group">
-                <label>筛选粒度</label>
-                <el-segmented
-                  v-model="recordFilters.granularity"
-                  :options="entryGranularityOptions"
-                  @change="handleRecordGranularityChange"
-                />
-              </div>
-
-              <div class="toolbar-group">
-                <label>{{ recordFilterPeriodLabel }}</label>
-                <el-date-picker
-                  v-model="recordFilters.period"
-                  :type="recordFilterPicker.type"
-                  :format="recordFilterPicker.format"
-                  :value-format="recordFilterPicker.valueFormat"
-                  :placeholder="recordFilterPicker.placeholder"
-                  :editable="false"
-                  popper-class="mobile-picker-popper"
-                  clearable
-                  class="full-control"
-                  @change="refreshRecords"
-                />
-              </div>
-
-              <div class="toolbar-group">
-                <label>渠道筛选</label>
-                <el-segmented
-                  v-model="recordFilters.channel"
-                  :options="channelFilterOptions"
-                  @change="refreshRecords"
-                />
-              </div>
-            </div>
-
-            <div class="ledger-summary">
-              <div>
-                <strong>{{ records.length }}</strong>
-                <span>条记录</span>
-              </div>
-              <div>
-                <strong>{{ money(recordTotalAmount) }}</strong>
-                <span>筛选后金额</span>
-              </div>
-              <div>
-                <strong>{{ recordTotalPeople }}</strong>
-                <span>筛选后人数</span>
-              </div>
-            </div>
-
-            <el-empty v-if="!recordsLoading && records.length === 0" description="当前筛选条件下暂无数据" />
-            <div v-else class="record-list">
-              <article v-for="item in pagedRecords" :key="item.id" class="record-card">
-                <div class="record-meta">
-                  <div class="record-badges">
-                    <el-tag round>{{ granularityText(item.granularity) }}</el-tag>
-                    <el-tag round :type="item.channel === 'wechat' ? 'success' : item.channel === 'alipay' ? 'primary' : 'warning'">
-                      {{ channelText(item.channel) }}
-                    </el-tag>
-                    <el-tag v-if="item.isOverridden" round type="warning">已被日汇总覆盖</el-tag>
-                  </div>
-                  <strong>{{ formatPeriodLabel(item.granularity, item.period) }}</strong>
-                  <span>创建于 {{ formatCreatedAt(item.createdAt) }}</span>
-                </div>
-
-                <div class="record-values">
-                  <div :class="{ 'record-value-secondary': item.isOverridden }">
-                    <label>{{ item.isOverridden ? '当前生效金额' : '收款金额' }}</label>
-                    <strong>{{ money(item.isOverridden ? item.effectiveAmount : item.amount) }}</strong>
-                    <small v-if="item.isOverridden">月录入值 {{ money(item.amount) }}</small>
-                  </div>
-                  <div :class="{ 'record-value-secondary': item.isOverridden }">
-                    <label>{{ item.isOverridden ? '当前生效人数' : '收款人数' }}</label>
-                    <strong>{{ item.isOverridden ? item.effectivePeople : item.people }} 人</strong>
-                    <small v-if="item.isOverridden">月录入值 {{ item.people }} 人</small>
-                  </div>
-                </div>
-
-                <div class="record-actions">
-                  <el-button text type="primary" @click="startEdit(item)">编辑</el-button>
-                  <el-popconfirm
-                    title="确认删除这条记录吗？"
-                    confirm-button-text="删除"
-                    cancel-button-text="取消"
-                    @confirm="deleteItem(item.id)"
-                  >
-                    <template #reference>
-                      <el-button text type="danger">删除</el-button>
-                    </template>
-                  </el-popconfirm>
-                </div>
-              </article>
-            </div>
-
-            <div v-if="records.length > pagination.pageSize" class="pagination-wrap">
-              <el-pagination
-                v-model:current-page="pagination.currentPage"
-                v-model:page-size="pagination.pageSize"
-                background
-                layout="prev, pager, next"
-                :total="records.length"
-                :pager-count="5"
-              />
-            </div>
-          </section>
-        </div>
+          </template>
+        </el-dialog>
       </section>
     </main>
+
+    <el-dialog
+      v-model="userDialogVisible"
+      title="新增用户"
+      width="min(92vw, 420px)"
+      class="user-dialog"
+      :close-on-click-modal="!userSaving"
+      :close-on-press-escape="!userSaving"
+    >
+      <el-form label-position="top" class="user-form" @submit.prevent>
+        <el-form-item label="用户名称">
+          <el-input v-model="userForm.name" maxlength="24" placeholder="请输入用户名称" />
+        </el-form-item>
+      </el-form>
+
+      <template #footer>
+        <div class="dialog-footer-actions">
+          <el-button :disabled="userSaving" @click="closeUserDialog">取消</el-button>
+          <el-button type="primary" :loading="userSaving" @click="createUser">保存</el-button>
+        </div>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
@@ -423,7 +479,10 @@ import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } 
 import * as echarts from 'echarts';
 import * as XLSX from 'xlsx';
 import { ElMessage } from 'element-plus';
-import { receiptApi } from './api';
+import { receiptApi, setActiveUserId, userApi } from './api';
+
+const USER_STORAGE_KEY = 'merchant-receipt-current-user-id';
+const DEFAULT_USER_ID = 'admin';
 
 const viewOptions = [
   { value: 'analytics', label: '统计分析', desc: '收入对比与趋势走势' },
@@ -483,6 +542,17 @@ const activeView = ref('analytics');
 const formRef = ref();
 const chartRef = ref();
 const importInput = ref();
+const storedUserId = localStorage.getItem(USER_STORAGE_KEY) || DEFAULT_USER_ID;
+const currentUserId = ref(storedUserId);
+const users = ref([]);
+const usersLoading = ref(false);
+const userSaving = ref(false);
+const userDialogVisible = ref(false);
+const userForm = reactive({
+  name: ''
+});
+
+setActiveUserId(storedUserId);
 
 const analytics = reactive({
   dimension: 'year',
@@ -516,6 +586,8 @@ const recordsLoading = ref(false);
 const saving = ref(false);
 const importing = ref(false);
 const editingId = ref('');
+const entryDialogVisible = ref(false);
+const importChannel = ref('wechat');
 const pagination = reactive({
   currentPage: 1,
   pageSize: 6
@@ -780,6 +852,8 @@ const shareRows = computed(() => {
 const recordFilterPeriodLabel = computed(() => (recordFilters.granularity === 'month' ? '筛选年份' : '筛选月份'));
 const recordTotalAmount = computed(() => records.value.reduce((total, item) => total + Number(item.amount || 0), 0));
 const recordTotalPeople = computed(() => records.value.reduce((total, item) => total + Number(item.people || 0), 0));
+const entryDialogTitle = computed(() => (editingId.value ? '编辑收款记录' : '新增收款记录'));
+const currentUserName = computed(() => users.value.find((item) => item.id === currentUserId.value)?.name || '管理员');
 
 const pagedRecords = computed(() => {
   const start = (pagination.currentPage - 1) * pagination.pageSize;
@@ -810,6 +884,77 @@ function switchView(view) {
   activeView.value = view;
 }
 
+async function loadUsers() {
+  usersLoading.value = true;
+
+  try {
+    const list = await userApi.list();
+    users.value = Array.isArray(list) ? list : [];
+
+    if (!users.value.some((item) => item.id === currentUserId.value)) {
+      currentUserId.value = users.value[0]?.id || DEFAULT_USER_ID;
+      setActiveUserId(currentUserId.value);
+      localStorage.setItem(USER_STORAGE_KEY, currentUserId.value);
+    }
+  } catch (error) {
+    users.value = [{ id: DEFAULT_USER_ID, name: '管理员', role: 'admin' }];
+    currentUserId.value = DEFAULT_USER_ID;
+    setActiveUserId(DEFAULT_USER_ID);
+    localStorage.setItem(USER_STORAGE_KEY, DEFAULT_USER_ID);
+    ElMessage.error(error.message || '加载用户失败');
+  } finally {
+    usersLoading.value = false;
+  }
+}
+
+async function handleUserChange(userId) {
+  currentUserId.value = userId || DEFAULT_USER_ID;
+  setActiveUserId(currentUserId.value);
+  localStorage.setItem(USER_STORAGE_KEY, currentUserId.value);
+  resetForm(getCreateFormDefaults());
+  await Promise.all([refreshAnalytics(), refreshRecords()]);
+}
+
+function openUserDialog() {
+  userForm.name = '';
+  userDialogVisible.value = true;
+}
+
+function closeUserDialog() {
+  userDialogVisible.value = false;
+}
+
+async function createUser() {
+  const name = userForm.name.trim();
+  if (!name) {
+    ElMessage.warning('请输入用户名称');
+    return;
+  }
+
+  userSaving.value = true;
+  try {
+    const user = await userApi.create({ name });
+    await loadUsers();
+    await handleUserChange(user.id);
+    closeUserDialog();
+    ElMessage.success('新增用户成功');
+  } catch (error) {
+    ElMessage.error(error.message || '新增用户失败');
+  } finally {
+    userSaving.value = false;
+  }
+}
+
+function getCreateFormDefaults() {
+  const granularity = recordFilters.granularity || 'day';
+  const channel = recordFilters.channel === 'all' ? importChannel.value : recordFilters.channel;
+  return {
+    channel,
+    granularity,
+    period: getCurrentPeriod(granularity)
+  };
+}
+
 function resetForm(preserveSelection = null) {
   const nextGranularity = preserveSelection?.granularity || form.granularity || 'day';
   editingId.value = '';
@@ -823,6 +968,19 @@ function resetForm(preserveSelection = null) {
   });
 
   nextTick(() => formRef.value?.clearValidate());
+}
+
+function openCreateDialog() {
+  resetForm(getCreateFormDefaults());
+  entryDialogVisible.value = true;
+}
+
+function closeEntryDialog() {
+  entryDialogVisible.value = false;
+}
+
+function handleEntryDialogClosed() {
+  if (!saving.value) resetForm(getCreateFormDefaults());
 }
 
 function handleAnalyticsDimensionChange(nextValue) {
@@ -997,7 +1155,7 @@ async function handleImportFile(event) {
       return;
     }
 
-    const result = await receiptApi.importRows({ channel: form.channel, rows });
+    const result = await receiptApi.importRows({ channel: importChannel.value, rows });
     ElMessage.success(`导入成功：新增 ${result.created} 条，更新 ${result.updated} 条`);
 
     recordFilters.granularity = 'month';
@@ -1038,11 +1196,13 @@ async function submitForm() {
       ElMessage.success('新增成功');
     }
 
+    importChannel.value = form.channel;
     recordFilters.granularity = form.granularity;
     recordFilters.period = getParentPeriod(form.granularity, form.period);
     activeView.value = 'entry';
 
     resetForm(preservedSelection);
+    closeEntryDialog();
     await Promise.all([refreshRecords(), refreshAnalytics()]);
   } catch (error) {
     ElMessage.error(error.message || '保存失败');
@@ -1054,6 +1214,7 @@ async function submitForm() {
 function startEdit(item) {
   activeView.value = 'entry';
   editingId.value = item.id;
+  importChannel.value = item.channel;
 
   Object.assign(form, {
     channel: item.channel,
@@ -1063,8 +1224,8 @@ function startEdit(item) {
     people: String(item.people)
   });
 
+  entryDialogVisible.value = true;
   nextTick(() => formRef.value?.clearValidate());
-  window.scrollTo({ top: 0, behavior: 'smooth' });
 }
 
 async function deleteItem(id) {
@@ -1238,6 +1399,7 @@ watch(
 );
 
 onMounted(async () => {
+  await loadUsers();
   await Promise.all([refreshAnalytics(), refreshRecords()]);
   window.addEventListener('resize', resizeChart);
 });

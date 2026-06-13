@@ -5,6 +5,18 @@ const request = axios.create({
   timeout: 10000
 });
 
+let activeUserId = 'admin';
+
+export function setActiveUserId(userId) {
+  activeUserId = userId || 'admin';
+}
+
+request.interceptors.request.use((config) => {
+  config.headers = config.headers || {};
+  config.headers['X-User-Id'] = activeUserId;
+  return config;
+});
+
 request.interceptors.response.use(
   (response) => {
     const body = response.data;
@@ -43,5 +55,14 @@ export const receiptApi = {
   },
   remove(id) {
     return request.delete(`/receipts/${id}`);
+  }
+};
+
+export const userApi = {
+  list() {
+    return request.get('/users');
+  },
+  create(data) {
+    return request.post('/users', data);
   }
 };

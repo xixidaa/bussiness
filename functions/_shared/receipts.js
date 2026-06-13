@@ -1,5 +1,11 @@
 import { seedReceipts } from '../../server/src/seed-data.js';
 
+const DEFAULT_USER = {
+  id: 'admin',
+  name: '管理员',
+  role: 'admin'
+};
+
 const CHANNEL_KEYS = ['wechat', 'alipay', 'cash'];
 const CHANNELS = new Set(CHANNEL_KEYS);
 const ANALYTICS_GRANULARITIES = new Set(['year', 'month', 'day']);
@@ -11,7 +17,10 @@ const PERIOD_PATTERNS = {
 };
 
 const SCHEMA_SQL = [
-  'CREATE TABLE IF NOT EXISTS receipts (id TEXT PRIMARY KEY, channel TEXT NOT NULL, granularity TEXT NOT NULL, period TEXT NOT NULL, date TEXT NOT NULL, amount REAL NOT NULL, people INTEGER NOT NULL, createdAt TEXT NOT NULL, updatedAt TEXT NOT NULL, UNIQUE(channel, granularity, period))',
+  'CREATE TABLE IF NOT EXISTS users (id TEXT PRIMARY KEY, name TEXT NOT NULL, role TEXT NOT NULL, createdAt TEXT NOT NULL, updatedAt TEXT NOT NULL)',
+  'CREATE TABLE IF NOT EXISTS receipts (id TEXT PRIMARY KEY, userId TEXT NOT NULL DEFAULT "admin", channel TEXT NOT NULL, granularity TEXT NOT NULL, period TEXT NOT NULL, date TEXT NOT NULL, amount REAL NOT NULL, people INTEGER NOT NULL, createdAt TEXT NOT NULL, updatedAt TEXT NOT NULL, UNIQUE(userId, channel, granularity, period))',
+  'CREATE INDEX IF NOT EXISTS idx_receipts_user_granularity_period ON receipts (userId, granularity, period)',
+  'CREATE INDEX IF NOT EXISTS idx_receipts_user_channel_period ON receipts (userId, channel, period)',
   'CREATE INDEX IF NOT EXISTS idx_receipts_granularity_period ON receipts (granularity, period)',
   'CREATE INDEX IF NOT EXISTS idx_receipts_channel_period ON receipts (channel, period)'
 ];
@@ -44,6 +53,16 @@ export async function withErrorHandling(task) {
 
 function normalizeChannel(value) {
   return CHANNELS.has(value) ? value : null;
+}
+
+function normalizeUserId(value) {
+  const text = String(value || '').trim();
+  return /^[a-zA-Z0-9_-]{2,32}$/.test(text) ? text : DEFAULT_USER.id;
+}
+
+function getCurrentUserId(request) {
+  const url = new URL(request.url);
+  return normalizeUserId(request.headers.get('x-user-id') || url.searchParams.get('userId') || DEFAULT_USER.id);
 }
 
 function normalizeGranularity(value, allowed = ANALYTICS_GRANULARITIES) {
@@ -116,6 +135,7 @@ function buildEffectiveMonthRecords(receipts) {
     const key = monthKey(item.channel, monthPeriod);
     const current = dayMap.get(key) || {
       id: `derived-${item.channel}-${monthPeriod}`,
+      userId: item.userId,
       channel: item.channel,
       granularity: 'month',
       period: monthPeriod,
@@ -164,6 +184,7 @@ function buildEffectiveYearRecords(receipts) {
     const key = `${item.channel}__${yearPeriod}`;
     const current = yearMap.get(key) || {
       id: `derived-${item.channel}-${yearPeriod}`,
+      userId: item.userId,
       channel: item.channel,
       granularity: 'year',
       period: yearPeriod,
@@ -302,9 +323,74 @@ function validateImportPayload(body) {
 }
 
 async function ensureSchema(db) {
+  await migrateReceiptsTable(db);
+
   for (const statement of SCHEMA_SQL) {
     await db.prepare(statement).run();
   }
+
+  await ensureDefaultUser(db);
+}
+
+async function tableColumns(db, tableName) {
+  const { results } = await db.prepare(`PRAGMA table_info('${tableName}')`).run();
+  return Array.isArray(results) ? results.map((item) => item.name) : [];
+}
+
+async function uniqueIndexColumns(db, tableName) {
+  const { results } = await db.prepare(`PRAGMA index_list('${tableName}')`).run();
+  const indexes = Array.isArray(results) ? results.filter((item) => Number(item.unique) === 1) : [];
+  const columns = [];
+
+  for (const item of indexes) {
+    const indexName = item.name;
+    const info = await db.prepare(`PRAGMA index_info('${indexName}')`).run();
+    columns.push((info.results || []).map((column) => column.name));
+  }
+
+  return columns;
+}
+
+async function hasUserScopedUniqueIndex(db) {
+  const indexes = await uniqueIndexColumns(db, 'receipts');
+  return indexes.some((columns) => columns.join(',') === 'userId,channel,granularity,period');
+}
+
+async function migrateReceiptsTable(db) {
+  const columns = await tableColumns(db, 'receipts');
+  if (columns.length === 0) return;
+
+  const needsUserColumn = !columns.includes('userId');
+  const needsScopedUniqueIndex = !(await hasUserScopedUniqueIndex(db));
+  if (!needsUserColumn && !needsScopedUniqueIndex) return;
+
+  await db.prepare('DROP TABLE IF EXISTS receipts_migrating').run();
+  await db.prepare(
+    'CREATE TABLE receipts_migrating (id TEXT PRIMARY KEY, userId TEXT NOT NULL DEFAULT "admin", channel TEXT NOT NULL, granularity TEXT NOT NULL, period TEXT NOT NULL, date TEXT NOT NULL, amount REAL NOT NULL, people INTEGER NOT NULL, createdAt TEXT NOT NULL, updatedAt TEXT NOT NULL, UNIQUE(userId, channel, granularity, period))'
+  ).run();
+
+  const userIdExpression = needsUserColumn ? `'${DEFAULT_USER.id}'` : `COALESCE(NULLIF(userId, ''), '${DEFAULT_USER.id}')`;
+  await db.prepare(
+    `INSERT OR IGNORE INTO receipts_migrating
+      (id, userId, channel, granularity, period, date, amount, people, createdAt, updatedAt)
+     SELECT id, ${userIdExpression}, channel, granularity, period, date, amount, people, createdAt, updatedAt
+     FROM receipts`
+  ).run();
+
+  await db.prepare('DROP TABLE receipts').run();
+  await db.prepare('ALTER TABLE receipts_migrating RENAME TO receipts').run();
+}
+
+async function ensureDefaultUser(db) {
+  const now = new Date().toISOString();
+  await db
+    .prepare(
+      `INSERT INTO users (id, name, role, createdAt, updatedAt)
+       VALUES (?, ?, ?, ?, ?)
+       ON CONFLICT(id) DO UPDATE SET name = excluded.name, role = excluded.role, updatedAt = excluded.updatedAt`
+    )
+    .bind(DEFAULT_USER.id, DEFAULT_USER.name, DEFAULT_USER.role, now, now)
+    .run();
 }
 
 async function seedIfNeeded(db) {
@@ -316,11 +402,12 @@ async function seedIfNeeded(db) {
     db
       .prepare(
         `INSERT OR IGNORE INTO receipts
-          (id, channel, granularity, period, date, amount, people, createdAt, updatedAt)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
+          (id, userId, channel, granularity, period, date, amount, people, createdAt, updatedAt)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
       )
       .bind(
         item.id,
+        item.userId || DEFAULT_USER.id,
         item.channel,
         item.granularity,
         item.period,
@@ -352,7 +439,9 @@ async function readReceipts(db) {
   const { results } = await db
     .prepare('SELECT * FROM receipts ORDER BY period DESC, updatedAt DESC')
     .run();
-  return Array.isArray(results) ? results : [];
+  return Array.isArray(results)
+    ? results.map((item) => ({ ...item, userId: normalizeUserId(item.userId) }))
+    : [];
 }
 
 async function writeReceipts(db, receipts) {
@@ -363,11 +452,12 @@ async function writeReceipts(db, receipts) {
     db
       .prepare(
         `INSERT INTO receipts
-          (id, channel, granularity, period, date, amount, people, createdAt, updatedAt)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
+          (id, userId, channel, granularity, period, date, amount, people, createdAt, updatedAt)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
       )
       .bind(
         item.id,
+        item.userId || DEFAULT_USER.id,
         item.channel,
         item.granularity,
         item.period,
@@ -380,6 +470,26 @@ async function writeReceipts(db, receipts) {
   );
 
   await db.batch(statements);
+}
+
+function userReceipts(receipts, userId) {
+  return receipts.filter((item) => item.userId === userId);
+}
+
+function mergeUserReceipts(allReceipts, userId, nextReceipts) {
+  return [
+    ...allReceipts.filter((item) => item.userId !== userId),
+    ...nextReceipts.map((item) => ({ ...item, userId }))
+  ];
+}
+
+async function readUsers(db) {
+  const { results } = await db.prepare('SELECT * FROM users ORDER BY role ASC, createdAt ASC').run();
+  return Array.isArray(results) ? results : [];
+}
+
+function normalizeUserName(value) {
+  return String(value || '').trim().slice(0, 24);
 }
 
 function attachDerivedMonthFlags(receipts) {
@@ -413,8 +523,36 @@ export async function handleHealth() {
   return json({ status: 'running' });
 }
 
+export async function handleUsersList(db) {
+  return json(await readUsers(db));
+}
+
+export async function handleUsersCreate(db, request) {
+  const body = await request.json().catch(() => null);
+  const name = normalizeUserName(body?.name);
+  const id = body?.id && /^[a-zA-Z0-9_-]{2,32}$/.test(String(body.id).trim())
+    ? String(body.id).trim()
+    : `user-${crypto.randomUUID().replace(/-/g, '').slice(0, 8)}`;
+
+  if (!name) return fail(400, '用户名称不能为空');
+
+  const now = new Date().toISOString();
+  const result = await db
+    .prepare(
+      `INSERT OR IGNORE INTO users (id, name, role, createdAt, updatedAt)
+       VALUES (?, ?, ?, ?, ?)`
+    )
+    .bind(id, name, 'user', now, now)
+    .run();
+
+  if (result.meta?.changes === 0) return fail(409, '用户已存在');
+
+  return json({ id, name, role: 'user', createdAt: now, updatedAt: now }, '新增成功');
+}
+
 export async function handleList(db, request) {
   const url = new URL(request.url);
+  const userId = getCurrentUserId(request);
   const granularity = url.searchParams.get('granularity')
     ? normalizeGranularity(url.searchParams.get('granularity'), ENTRY_GRANULARITIES)
     : null;
@@ -427,7 +565,7 @@ export async function handleList(db, request) {
   if (url.searchParams.has('period') && !period) return fail(400, '周期格式与粒度不匹配');
   if (granularity && !validateParentPeriod(granularity, parentPeriod)) return fail(400, '父级周期格式不正确');
 
-  const receipts = await readReceipts(db);
+  const receipts = userReceipts(await readReceipts(db), userId);
   const result = attachDerivedMonthFlags(receipts)
     .filter((item) => (granularity ? item.granularity === granularity : true))
     .filter((item) => (period ? item.period === period : true))
@@ -440,6 +578,7 @@ export async function handleList(db, request) {
 
 export async function handleSingle(db, request) {
   const url = new URL(request.url);
+  const userId = getCurrentUserId(request);
   const granularity = normalizeGranularity(url.searchParams.get('granularity'), ENTRY_GRANULARITIES);
   const channel = normalizeChannel(url.searchParams.get('channel'));
   const period = normalizePeriod(granularity, url.searchParams.get('period'));
@@ -448,7 +587,7 @@ export async function handleSingle(db, request) {
   if (!channel) return fail(400, '渠道必须为 wechat、alipay 或 cash');
   if (!period) return fail(400, '周期格式与粒度不匹配');
 
-  const receipts = await readReceipts(db);
+  const receipts = userReceipts(await readReceipts(db), userId);
   const result = receipts
     .filter((item) => item.granularity === granularity)
     .filter((item) => item.channel === channel)
@@ -460,13 +599,14 @@ export async function handleSingle(db, request) {
 
 export async function handleSummary(db, request) {
   const url = new URL(request.url);
+  const userId = getCurrentUserId(request);
   const dimension = normalizeGranularity(url.searchParams.get('dimension') || 'month');
   const period = url.searchParams.get('period') ? normalizePeriod(dimension, url.searchParams.get('period')) : null;
 
   if (!dimension) return fail(400, '统计粒度必须为 year、month 或 day');
   if (url.searchParams.has('period') && !period) return fail(400, '周期格式与粒度不匹配');
 
-  const receipts = await readReceipts(db);
+  const receipts = userReceipts(await readReceipts(db), userId);
   const records = getRecordsForDimension(receipts, dimension);
   const scoped = records.filter((item) => (period ? item.period === period : true));
 
@@ -479,13 +619,14 @@ export async function handleSummary(db, request) {
 
 export async function handleTrend(db, request) {
   const url = new URL(request.url);
+  const userId = getCurrentUserId(request);
   const dimension = normalizeGranularity(url.searchParams.get('dimension') || 'month');
   const parentPeriod = url.searchParams.get('parentPeriod') || '';
 
   if (!dimension) return fail(400, '统计粒度必须为 year、month 或 day');
   if (!validateParentPeriod(dimension, parentPeriod)) return fail(400, '父级周期格式不正确');
 
-  const receipts = await readReceipts(db);
+  const receipts = userReceipts(await readReceipts(db), userId);
   const records = getRecordsForDimension(receipts, dimension).filter((item) =>
     parentPeriod ? getParentPeriod(dimension, item.period) === parentPeriod : true
   );
@@ -494,11 +635,13 @@ export async function handleTrend(db, request) {
 }
 
 export async function handleCreate(db, request) {
+  const userId = getCurrentUserId(request);
   const body = await request.json().catch(() => null);
   const { errors, value } = validateEntryPayload(body || {});
   if (errors.length) return fail(400, errors.join('；'));
 
-  const receipts = await readReceipts(db);
+  const allReceipts = await readReceipts(db);
+  const receipts = userReceipts(allReceipts, userId);
   const duplicated = receipts.find(
     (item) =>
       item.channel === value.channel &&
@@ -514,22 +657,25 @@ export async function handleCreate(db, request) {
   const now = new Date().toISOString();
   const receipt = {
     id: crypto.randomUUID().replace(/-/g, '').slice(0, 10),
+    userId,
     ...value,
     createdAt: now,
     updatedAt: now
   };
 
   receipts.push(receipt);
-  await writeReceipts(db, receipts);
+  await writeReceipts(db, mergeUserReceipts(allReceipts, userId, receipts));
   return json(receipt, '新增成功');
 }
 
 export async function handleImport(db, request) {
+  const userId = getCurrentUserId(request);
   const body = await request.json().catch(() => null);
   const { errors, values } = validateImportPayload(body || {});
   if (errors.length) return fail(400, errors.join('；'));
 
-  const receipts = await readReceipts(db);
+  const allReceipts = await readReceipts(db);
+  const receipts = userReceipts(allReceipts, userId);
   const blocked = values.filter((item) => hasDayDataForMonth(receipts, item.channel, item.period));
   if (blocked.length) {
     return fail(409, `以下月份已有日数据，不能导入月数据：${blocked.map((item) => item.period).join('、')}`);
@@ -550,6 +696,7 @@ export async function handleImport(db, request) {
     if (index === -1) {
       receipts.push({
         id: crypto.randomUUID().replace(/-/g, '').slice(0, 10),
+        userId,
         ...value,
         createdAt: now,
         updatedAt: now
@@ -565,16 +712,18 @@ export async function handleImport(db, request) {
     }
   }
 
-  await writeReceipts(db, receipts);
+  await writeReceipts(db, mergeUserReceipts(allReceipts, userId, receipts));
   return json({ created, updated, total: values.length }, '导入成功');
 }
 
 export async function handleUpdate(db, request, id) {
+  const userId = getCurrentUserId(request);
   const body = await request.json().catch(() => null);
   const { errors, value } = validateEntryPayload(body || {});
   if (errors.length) return fail(400, errors.join('；'));
 
-  const receipts = await readReceipts(db);
+  const allReceipts = await readReceipts(db);
+  const receipts = userReceipts(allReceipts, userId);
   const index = receipts.findIndex((item) => item.id === id);
   if (index === -1) return fail(404, '数据不存在');
 
@@ -597,15 +746,17 @@ export async function handleUpdate(db, request, id) {
     updatedAt: new Date().toISOString()
   };
 
-  await writeReceipts(db, receipts);
+  await writeReceipts(db, mergeUserReceipts(allReceipts, userId, receipts));
   return json(receipts[index], '修改成功');
 }
 
-export async function handleDelete(db, id) {
-  const receipts = await readReceipts(db);
+export async function handleDelete(db, request, id) {
+  const userId = getCurrentUserId(request);
+  const allReceipts = await readReceipts(db);
+  const receipts = userReceipts(allReceipts, userId);
   const nextReceipts = receipts.filter((item) => item.id !== id);
   if (nextReceipts.length === receipts.length) return fail(404, '数据不存在');
 
-  await writeReceipts(db, nextReceipts);
+  await writeReceipts(db, mergeUserReceipts(allReceipts, userId, nextReceipts));
   return json({ id }, '删除成功');
 }

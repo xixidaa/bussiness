@@ -1,6 +1,7 @@
 import express from 'express';
 import cors from 'cors';
 import receiptRoutes from './routes/receipts.js';
+import userRoutes from './routes/users.js';
 import { ensureDataFile } from './storage.js';
 
 const app = express();
@@ -16,6 +17,7 @@ app.get('/api/health', (req, res) => {
 });
 
 app.use('/api/receipts', receiptRoutes);
+app.use('/api/users', userRoutes);
 
 app.use((req, res) => {
   res.status(404).json({ code: 404, message: '接口不存在', data: null });
