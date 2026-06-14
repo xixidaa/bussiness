@@ -2,10 +2,10 @@
   <div class="app-shell">
     <header class="hero-banner">
       <div class="hero-copy">
-        <span class="hero-badge">Merchant Revenue Studio</span>
-        <h1>商家收款数据统计</h1>
+        <span class="hero-badge">Revenue Ledger Workspace</span>
+        <h1>门店营收与收款台账</h1>
         <p>
-          年度统计由有效月数据自动汇总，月度统计优先采用日数据回推。
+          面向日常经营复盘的轻量工作台，支持按年、按月、按日查看趋势，也支持随手补录和批量导入收款数据。
         </p>
       </div>
 
@@ -58,7 +58,7 @@
           <div class="section-heading">
             <div>
               <span class="section-kicker">Analytics</span>
-              <h2>统计分析</h2>
+              <h2>经营看板</h2>
               <p>{{ trendScopeText }}</p>
             </div>
             <div class="heading-actions">
@@ -116,101 +116,102 @@
             </div>
           </div>
 
-          <div class="compare-ribbon" :class="{ 'year-ribbon': analytics.dimension === 'year' }">
-            <template v-if="analytics.dimension === 'year'">
-              <article
-                v-for="item in yearCompareCards"
-                :key="item.period"
-                class="compare-card"
-                :class="{ 'compare-card-alt': item.period === getCurrentPeriod('year') }"
-              >
-                <span>{{ formatPeriodLabel('year', item.period) }}</span>
-                <strong>{{ money(item.summary.total.amount) }}</strong>
-                <small>客单价 {{ formatAverage(averageFromSummary(item.summary)) }}</small>
-                <small>{{ item.summary.total.people }} 人 / 微信 {{ money(item.summary.wechat.amount) }} / 支付宝 {{ money(item.summary.alipay.amount) }} / 现金 {{ money(item.summary.cash.amount) }}</small>
-              </article>
-            </template>
-
-            <template v-else>
-            <article class="compare-card">
-              <span>当前周期</span>
-              <strong>{{ selectedPeriodLabel }}</strong>
-              <small>客单价 {{ averagePerPerson }}</small>
-              <small>{{ money(summary.total.amount) }} / {{ summary.total.people }} 人</small>
+          <div class="compare-ribbon desktop-card-grid" :class="{ 'year-ribbon': analytics.dimension === 'year' }">
+            <article
+              v-for="item in compareCards"
+              :key="item.key"
+              class="compare-card"
+              :class="item.className"
+            >
+              <span>{{ item.label }}</span>
+              <strong :class="item.valueClass">{{ item.value }}</strong>
+              <small v-for="line in item.notes" :key="line">{{ line }}</small>
             </article>
-
-            <article class="compare-card compare-card-alt">
-              <span>{{ compareAnchorLabel }}</span>
-              <strong>{{ comparePeriodLabel }}</strong>
-              <small>客单价 {{ compareAveragePerPerson }}</small>
-              <small>{{ money(compareSummary.total.amount) }} / {{ compareSummary.total.people }} 人</small>
-            </article>
-
-            <article class="compare-card compare-card-delta">
-              <span>收入差值</span>
-              <strong :class="deltaClass(comparisonDelta.amount)">
-                {{ formatMoneyDelta(comparisonDelta.amount) }}
-              </strong>
-              <small>{{ compareRuleText }}</small>
-            </article>
-
-            <article class="compare-card compare-card-delta">
-              <span>人数差值</span>
-              <strong :class="deltaClass(comparisonDelta.people)">
-                {{ formatPeopleDelta(comparisonDelta.people) }}
-              </strong>
-              <small>
-                {{
-                  comparisonDelta.people === 0
-                    ? '人数持平'
-                    : comparisonDelta.people > 0
-                      ? '人数更高'
-                      : '人数更低'
-                }}
-              </small>
-            </article>
-            <article class="compare-card compare-card-delta">
-              <span>客单价差值</span>
-              <strong :class="deltaClass(comparisonDelta.average)">
-                {{ formatAverageDelta(comparisonDelta.average) }}
-              </strong>
-              <small>{{ compareRuleText }}</small>
-            </article>
-            </template>
           </div>
+
+          <el-carousel
+            ref="compareCarouselRef"
+            class="mobile-card-carousel compare-mobile-carousel"
+            height="126px"
+            arrow="never"
+            :autoplay="false"
+            @pointerdown="handleCarouselDragStart($event, 'compare')"
+            @pointermove="handleCarouselDragMove($event, 'compare')"
+            @pointerup="handleCarouselDragEnd($event, 'compare')"
+            @pointercancel="resetCarouselDrag"
+            @mousedown="handleCarouselDragStart($event, 'compare')"
+            @mousemove="handleCarouselDragMove($event, 'compare')"
+            @mouseup="handleCarouselDragEnd($event, 'compare')"
+            @mouseleave="resetCarouselDrag"
+            @touchstart="handleCarouselDragStart($event, 'compare')"
+            @touchmove="handleCarouselDragMove($event, 'compare')"
+            @touchend="handleCarouselDragEnd($event, 'compare')"
+            @touchcancel="resetCarouselDrag"
+          >
+            <el-carousel-item v-for="item in compareCards" :key="item.key">
+              <article
+                class="compare-card"
+                :class="item.className"
+              >
+                <span>{{ item.label }}</span>
+                <div class="compare-card-main">
+                  <strong :class="item.valueClass">{{ item.value }}</strong>
+                  <small v-if="item.compactMeta">{{ item.compactMeta }}</small>
+                </div>
+                <small v-for="line in item.mobileNotes || item.notes" :key="line">{{ line }}</small>
+              </article>
+            </el-carousel-item>
+          </el-carousel>
         </section>
 
         <section class="analytics-grid">
-          <article class="kpi-card card-wechat">
-            <span>微信收款</span>
-            <strong>{{ money(summary.wechat.amount) }}</strong>
-            <small>{{ summary.wechat.people }} 人</small>
-          </article>
+          <div class="kpi-carousel desktop-card-grid" aria-label="收款关键指标">
+            <article
+              v-for="item in kpiCards"
+              :key="item.key"
+              class="kpi-card"
+              :class="item.className"
+            >
+              <span>{{ item.label }}</span>
+              <strong>{{ item.value }}</strong>
+              <small>{{ item.note }}</small>
+            </article>
+          </div>
 
-          <article class="kpi-card card-alipay">
-            <span>支付宝收款</span>
-            <strong>{{ money(summary.alipay.amount) }}</strong>
-            <small>{{ summary.alipay.people }} 人</small>
-          </article>
-
-          <article class="kpi-card card-cash">
-            <span>现金收款</span>
-            <strong>{{ money(summary.cash.amount) }}</strong>
-            <small>{{ summary.cash.people }} 人</small>
-          </article>
-
-          <article class="kpi-card card-total">
-            <span>全渠道合计</span>
-            <strong>{{ money(summary.total.amount) }}</strong>
-            <small>客单价 {{ averagePerPerson }}</small>
-          </article>
+          <el-carousel
+            ref="kpiCarouselRef"
+            class="mobile-card-carousel kpi-mobile-carousel"
+            height="118px"
+            arrow="never"
+            :autoplay="false"
+            @pointerdown="handleCarouselDragStart($event, 'kpi')"
+            @pointermove="handleCarouselDragMove($event, 'kpi')"
+            @pointerup="handleCarouselDragEnd($event, 'kpi')"
+            @pointercancel="resetCarouselDrag"
+            @mousedown="handleCarouselDragStart($event, 'kpi')"
+            @mousemove="handleCarouselDragMove($event, 'kpi')"
+            @mouseup="handleCarouselDragEnd($event, 'kpi')"
+            @mouseleave="resetCarouselDrag"
+            @touchstart="handleCarouselDragStart($event, 'kpi')"
+            @touchmove="handleCarouselDragMove($event, 'kpi')"
+            @touchend="handleCarouselDragEnd($event, 'kpi')"
+            @touchcancel="resetCarouselDrag"
+          >
+            <el-carousel-item v-for="item in kpiCards" :key="item.key">
+              <article class="kpi-card" :class="item.className">
+                <span>{{ item.label }}</span>
+                <strong>{{ item.value }}</strong>
+                <small>{{ item.note }}</small>
+              </article>
+            </el-carousel-item>
+          </el-carousel>
 
           <section class="panel chart-panel">
             <div class="section-heading compact">
               <div>
                 <span class="section-kicker">Trend</span>
                 <h2>{{ chartTitle }}</h2>
-                <p>按当前统计粒度展示微信、支付宝、现金与合计走势。</p>
+                <p>帮助快速判断不同渠道的收款波动与经营节奏。</p>
               </div>
             </div>
             <div ref="chartRef" class="chart-box"></div>
@@ -220,8 +221,8 @@
             <div class="section-heading compact">
               <div>
                 <span class="section-kicker">Mix</span>
-                <h2>渠道占比</h2>
-                <p>当前周期下的金额与人数贡献分布。</p>
+                <h2>渠道结构</h2>
+                <p>查看当前周期下各渠道的金额和到店人数贡献。</p>
               </div>
             </div>
 
@@ -243,13 +244,13 @@
             <div class="section-heading compact">
               <div>
                 <span class="section-kicker">Periods</span>
-                <h2>周期明细</h2>
+                <h2>周期拆解</h2>
                 <p>{{ detailHint }}</p>
               </div>
             </div>
 
             <el-empty v-if="!analyticsLoading && detailRows.length === 0" description="暂无可展示的趋势数据" />
-            <div v-else class="detail-list">
+            <div v-else class="detail-list desktop-card-grid">
               <article v-for="item in detailRows" :key="item.period" class="detail-item">
                 <div class="detail-top">
                   <strong>{{ formatPeriodLabel(analytics.dimension, item.period) }}</strong>
@@ -264,6 +265,42 @@
                 </div>
               </article>
             </div>
+            <el-carousel
+              v-if="!analyticsLoading && detailRows.length > 0"
+              ref="detailCarouselRef"
+              class="mobile-card-carousel detail-mobile-carousel"
+              height="126px"
+              arrow="never"
+              :autoplay="false"
+              @pointerdown="handleCarouselDragStart($event, 'detail')"
+              @pointermove="handleCarouselDragMove($event, 'detail')"
+              @pointerup="handleCarouselDragEnd($event, 'detail')"
+              @pointercancel="resetCarouselDrag"
+              @mousedown="handleCarouselDragStart($event, 'detail')"
+              @mousemove="handleCarouselDragMove($event, 'detail')"
+              @mouseup="handleCarouselDragEnd($event, 'detail')"
+              @mouseleave="resetCarouselDrag"
+              @touchstart="handleCarouselDragStart($event, 'detail')"
+              @touchmove="handleCarouselDragMove($event, 'detail')"
+              @touchend="handleCarouselDragEnd($event, 'detail')"
+              @touchcancel="resetCarouselDrag"
+            >
+              <el-carousel-item v-for="item in detailRows" :key="item.period">
+                <article class="detail-item">
+                  <div class="detail-top">
+                    <strong>{{ formatPeriodLabel(analytics.dimension, item.period) }}</strong>
+                    <span>总收入 {{ money(item.summary.total.amount) }}</span>
+                  </div>
+                  <div class="detail-values">
+                    <span>微信 {{ money(item.summary.wechat.amount) }}</span>
+                    <span>支付宝 {{ money(item.summary.alipay.amount) }}</span>
+                    <span>现金 {{ money(item.summary.cash.amount) }}</span>
+                    <span>{{ item.summary.total.people }} 人</span>
+                    <span>客单价 {{ formatAverage(averageFromSummary(item.summary)) }}</span>
+                  </div>
+                </article>
+              </el-carousel-item>
+            </el-carousel>
           </section>
         </section>
       </section>
@@ -277,11 +314,12 @@
           <div class="section-heading ledger-heading">
             <div>
               <span class="section-kicker">Records</span>
-              <h2>录入台账</h2>
-              <p>月台账按年份筛选，日台账按月份筛选。新增与编辑记录在弹窗中完成，列表始终作为默认工作区。</p>
+              <h2>收款台账</h2>
+              <p>按筛选结果集中查看台账，新增、编辑与 Excel 导入都在这里完成，导入数据默认记入微信渠道。</p>
             </div>
             <div class="heading-actions ledger-actions">
-              <el-button type="primary" @click="openCreateDialog">新增记录</el-button>
+              <el-button type="primary" @click="openCreateDialog">新建收款</el-button>
+              <el-button @click="exportRecords">导出当前结果</el-button>
               <el-button tag="a" href="/receipt-import-template.csv" download="收款导入模板.csv">下载模板</el-button>
               <el-button :loading="importing" @click="triggerImport">Excel导入</el-button>
               <el-button :loading="recordsLoading" @click="refreshRecords">刷新列表</el-button>
@@ -322,11 +360,6 @@
             </div>
 
             <div class="toolbar-group">
-              <label>导入渠道</label>
-              <el-segmented v-model="importChannel" :options="channelOptions" />
-            </div>
-
-            <div class="toolbar-group">
               <label>渠道筛选</label>
               <el-segmented
                 v-model="recordFilters.channel"
@@ -338,60 +371,54 @@
           </div>
 
           <div class="ledger-summary">
-            <div>
-              <strong>{{ records.length }}</strong>
-              <span>条记录</span>
-            </div>
-            <div>
-              <strong>{{ money(recordTotalAmount) }}</strong>
-              <span>筛选后金额</span>
-            </div>
-            <div>
-              <strong>{{ recordTotalPeople }}</strong>
-              <span>筛选后人数</span>
+            <span class="ledger-summary-title">当前筛选统计</span>
+            <div class="ledger-summary-metrics">
+              <strong>{{ records.length }} 条记录</strong>
+              <span>金额 {{ money(recordTotalAmount) }}</span>
+              <span>人数 {{ recordTotalPeople }} 人</span>
             </div>
           </div>
 
           <el-empty v-if="!recordsLoading && records.length === 0" description="当前筛选条件下暂无数据" />
           <div v-else class="record-list">
             <article v-for="item in pagedRecords" :key="item.id" class="record-card">
-              <div class="record-meta">
+              <div class="record-main">
                 <div class="record-badges">
                   <el-tag round>{{ granularityText(item.granularity) }}</el-tag>
                   <el-tag round :type="item.channel === 'wechat' ? 'success' : item.channel === 'alipay' ? 'primary' : 'warning'">
                     {{ channelText(item.channel) }}
                   </el-tag>
-                  <el-tag v-if="item.isOverridden" round type="warning">已被日汇总覆盖</el-tag>
+                  <el-tag v-if="item.isOverridden" round type="warning">按日汇总已生效</el-tag>
                 </div>
-                <strong>{{ formatPeriodLabel(item.granularity, item.period) }}</strong>
-                <span>创建于 {{ formatCreatedAt(item.createdAt) }}</span>
-              </div>
 
-              <div class="record-values">
-                <div :class="{ 'record-value-secondary': item.isOverridden }">
-                  <label>{{ item.isOverridden ? '当前生效金额' : '收款金额' }}</label>
-                  <strong>{{ money(item.isOverridden ? item.effectiveAmount : item.amount) }}</strong>
-                  <small v-if="item.isOverridden">月录入值 {{ money(item.amount) }}</small>
-                </div>
-                <div :class="{ 'record-value-secondary': item.isOverridden }">
-                  <label>{{ item.isOverridden ? '当前生效人数' : '收款人数' }}</label>
-                  <strong>{{ item.isOverridden ? item.effectivePeople : item.people }} 人</strong>
-                  <small v-if="item.isOverridden">月录入值 {{ item.people }} 人</small>
-                </div>
-              </div>
+                <div class="record-content-row">
+                  <div class="record-values">
+                    <strong>{{ money(getEffectiveAmount(item)) }}</strong>
+                    <span>{{ getEffectivePeople(item) }} 人</span>
+                  </div>
 
-              <div class="record-actions">
-                <el-button text type="primary" @click="startEdit(item)">编辑</el-button>
-                <el-popconfirm
-                  title="确认删除这条记录吗？"
-                  confirm-button-text="删除"
-                  cancel-button-text="取消"
-                  @confirm="deleteItem(item.id)"
-                >
-                  <template #reference>
-                    <el-button text type="danger">删除</el-button>
-                  </template>
-                </el-popconfirm>
+                  <div class="record-meta">
+                    <strong>{{ item.period }}</strong>
+                  </div>
+
+                  <div class="record-actions">
+                    <el-button text type="primary" @click="startEdit(item)">编辑</el-button>
+                    <el-popconfirm
+                      title="确认删除这条记录吗？"
+                      confirm-button-text="删除"
+                      cancel-button-text="取消"
+                      @confirm="deleteItem(item.id)"
+                    >
+                      <template #reference>
+                        <el-button text type="danger">删除</el-button>
+                      </template>
+                    </el-popconfirm>
+                  </div>
+                </div>
+
+                <p v-if="item.isOverridden" class="record-note">
+                  原月录入值：{{ money(item.amount) }} / {{ item.people }} 人，当前展示结果以日汇总为准。
+                </p>
               </div>
             </article>
           </div>
@@ -418,7 +445,7 @@
           :close-on-press-escape="!saving"
           @closed="handleEntryDialogClosed"
         >
-          <p class="dialog-helper">仅支持按月、按日录入。年数据自动汇总，月数据若存在日记录则由日汇总接管。</p>
+          <p class="dialog-helper">仅支持按月、按日录入。系统会自动汇总年度数据；若当月已有日记录，则月度展示与统计以日汇总结果为准。</p>
 
           <el-form ref="formRef" :model="form" :rules="rules" label-position="top" class="entry-form">
             <el-form-item label="录入粒度" prop="granularity">
@@ -463,7 +490,7 @@
             <div class="dialog-footer-actions">
               <el-button :disabled="saving" @click="closeEntryDialog">取消</el-button>
               <el-button type="primary" :loading="saving" @click="submitForm">
-                {{ editingId ? '保存修改' : '写入记录' }}
+                {{ editingId ? '保存修改' : '保存记录' }}
               </el-button>
             </div>
           </template>
@@ -504,10 +531,16 @@ import { receiptApi, setActiveUserId, userApi } from './api';
 
 const USER_STORAGE_KEY = 'merchant-receipt-current-user-id';
 const DEFAULT_USER_ID = 'admin';
+const DEFAULT_CREATE_CHANNEL = 'wechat';
+const DEFAULT_IMPORT_CHANNEL = 'wechat';
+const VIEW_ROUTE_MAP = {
+  analytics: '#/analytics',
+  entry: '#/entry'
+};
 
 const viewOptions = [
-  { value: 'analytics', label: '统计分析', desc: '收入对比与趋势走势' },
-  { value: 'entry', label: '数据录入', desc: '按月、按日维护台账' }
+  { value: 'analytics', label: '统计分析', desc: '查看趋势、对比结果和渠道结构' },
+  { value: 'entry', label: '数据录入', desc: '维护台账、批量导入和导出结果' }
 ];
 
 const analyticsGranularityOptions = [
@@ -562,6 +595,9 @@ function defaultCompareYears() {
 const activeView = ref('analytics');
 const formRef = ref();
 const chartRef = ref();
+const compareCarouselRef = ref();
+const kpiCarouselRef = ref();
+const detailCarouselRef = ref();
 const importInput = ref();
 const storedUserId = localStorage.getItem(USER_STORAGE_KEY) || DEFAULT_USER_ID;
 const currentUserId = ref(storedUserId);
@@ -583,7 +619,7 @@ const analytics = reactive({
 });
 
 const form = reactive({
-  channel: 'wechat',
+  channel: DEFAULT_CREATE_CHANNEL,
   granularity: 'day',
   period: getCurrentPeriod('day'),
   amount: '',
@@ -608,10 +644,17 @@ const saving = ref(false);
 const importing = ref(false);
 const editingId = ref('');
 const entryDialogVisible = ref(false);
-const importChannel = ref('wechat');
 const pagination = reactive({
   currentPage: 1,
-  pageSize: 6
+  pageSize: 10
+});
+const carouselDrag = reactive({
+  target: '',
+  startX: 0,
+  startY: 0,
+  lastX: 0,
+  moved: false,
+  touchAt: 0
 });
 
 let chartInstance = null;
@@ -720,11 +763,13 @@ function formatPeriodLabel(granularity, period) {
   return `${year} 年 ${month} 月 ${day} 日`;
 }
 
-function formatCreatedAt(value) {
-  return new Date(value).toLocaleDateString('zh-CN', {
+function formatDateTime(value) {
+  return new Date(value).toLocaleString('zh-CN', {
     year: 'numeric',
     month: '2-digit',
-    day: '2-digit'
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit'
   });
 }
 
@@ -758,6 +803,129 @@ function formatAverage(value) {
 function formatAverageDelta(value) {
   const prefix = value > 0 ? '+' : value < 0 ? '-' : '';
   return `${prefix}${money(Math.abs(value))} / 人`;
+}
+
+function getEffectiveAmount(item) {
+  return item.isOverridden ? item.effectiveAmount : item.amount;
+}
+
+function getEffectivePeople(item) {
+  return item.isOverridden ? item.effectivePeople : item.people;
+}
+
+function resolveViewFromHash(hash) {
+  return Object.entries(VIEW_ROUTE_MAP).find(([, value]) => value === hash)?.[0] || 'analytics';
+}
+
+function syncViewFromHash() {
+  activeView.value = resolveViewFromHash(window.location.hash);
+}
+
+function applyViewRoute(view, replace = false) {
+  const nextHash = VIEW_ROUTE_MAP[view] || VIEW_ROUTE_MAP.analytics;
+  const nextUrl = `${window.location.pathname}${window.location.search}${nextHash}`;
+
+  if (replace) {
+    window.history.replaceState(null, '', nextUrl);
+    syncViewFromHash();
+    return;
+  }
+
+  if (window.location.hash === nextHash) {
+    activeView.value = view;
+    return;
+  }
+
+  window.location.hash = nextHash;
+}
+
+function handleHashChange() {
+  syncViewFromHash();
+}
+
+function getCarouselRef(target) {
+  if (target === 'compare') return compareCarouselRef.value;
+  if (target === 'kpi') return kpiCarouselRef.value;
+  if (target === 'detail') return detailCarouselRef.value;
+  return null;
+}
+
+function resetCarouselDrag() {
+  Object.assign(carouselDrag, {
+    target: '',
+    startX: 0,
+    startY: 0,
+    lastX: 0,
+    moved: false,
+    touchAt: carouselDrag.touchAt
+  });
+}
+
+function getDragPoint(event, phase = 'active') {
+  if (event.touches?.length) return event.touches[0];
+  if (phase === 'end' && event.changedTouches?.length) return event.changedTouches[0];
+  return event;
+}
+
+function isMouseAfterTouch(event) {
+  return event.type.startsWith('mouse') && Date.now() - carouselDrag.touchAt < 500;
+}
+
+function handleCarouselDragStart(event, target) {
+  if (event.type === 'mousedown' && event.button !== 0) return;
+  if (isMouseAfterTouch(event)) return;
+
+  if (event.type.startsWith('touch') || event.pointerType === 'touch') {
+    carouselDrag.touchAt = Date.now();
+  }
+
+  const point = getDragPoint(event);
+
+  Object.assign(carouselDrag, {
+    target,
+    startX: point.clientX,
+    startY: point.clientY,
+    lastX: point.clientX,
+    moved: false
+  });
+
+  if (event.type.startsWith('pointer')) {
+    event.currentTarget?.setPointerCapture?.(event.pointerId);
+  }
+}
+
+function handleCarouselDragMove(event, target) {
+  if (carouselDrag.target !== target) return;
+  if (isMouseAfterTouch(event)) return;
+
+  const point = getDragPoint(event);
+  carouselDrag.lastX = point.clientX;
+  const deltaX = point.clientX - carouselDrag.startX;
+  const deltaY = point.clientY - carouselDrag.startY;
+
+  if (Math.abs(deltaX) > 8 && Math.abs(deltaX) > Math.abs(deltaY)) {
+    carouselDrag.moved = true;
+    event.preventDefault();
+  }
+}
+
+function handleCarouselDragEnd(event, target) {
+  if (carouselDrag.target !== target) return;
+  if (isMouseAfterTouch(event)) return;
+
+  const point = getDragPoint(event, 'end');
+  const deltaX = point.clientX - carouselDrag.startX;
+  const carousel = getCarouselRef(target);
+
+  if (carouselDrag.moved && Math.abs(deltaX) > 40) {
+    if (deltaX < 0) carousel?.next?.();
+    else carousel?.prev?.();
+  }
+
+  if (event.type.startsWith('pointer')) {
+    event.currentTarget?.releasePointerCapture?.(event.pointerId);
+  }
+  resetCarouselDrag();
 }
 
 function waitForPaint() {
@@ -841,6 +1009,106 @@ const yearCompareCards = computed(() =>
     .sort((left, right) => right.period.localeCompare(left.period))
 );
 
+const compareCards = computed(() => {
+  if (analytics.dimension === 'year') {
+    return yearCompareCards.value.map((item) => ({
+      key: `year-${item.period}`,
+      label: formatPeriodLabel('year', item.period),
+      value: money(item.summary.total.amount),
+      valueClass: '',
+      className: item.period === getCurrentPeriod('year') ? 'compare-card-alt' : '',
+      compactMeta: `客单价 ${formatAverage(averageFromSummary(item.summary))} | ${item.summary.total.people} 人`,
+      mobileNotes: [
+        `微信 ${money(item.summary.wechat.amount)} / 支付宝 ${money(item.summary.alipay.amount)} / 现金 ${money(item.summary.cash.amount)}`
+      ],
+      notes: [
+        `客单价 ${formatAverage(averageFromSummary(item.summary))}`,
+        `${item.summary.total.people} 人 / 微信 ${money(item.summary.wechat.amount)} / 支付宝 ${money(item.summary.alipay.amount)} / 现金 ${money(item.summary.cash.amount)}`
+      ]
+    }));
+  }
+
+  return [
+    {
+      key: 'current',
+      label: '当前周期',
+      value: selectedPeriodLabel.value,
+      valueClass: '',
+      className: '',
+      notes: [`客单价 ${averagePerPerson.value}`, `${money(summary.total.amount)} / ${summary.total.people} 人`]
+    },
+    {
+      key: 'compare',
+      label: compareAnchorLabel.value,
+      value: comparePeriodLabel.value,
+      valueClass: '',
+      className: 'compare-card-alt',
+      notes: [`客单价 ${compareAveragePerPerson.value}`, `${money(compareSummary.total.amount)} / ${compareSummary.total.people} 人`]
+    },
+    {
+      key: 'amount-delta',
+      label: '收入差值',
+      value: formatMoneyDelta(comparisonDelta.value.amount),
+      valueClass: deltaClass(comparisonDelta.value.amount),
+      className: 'compare-card-delta',
+      notes: [compareRuleText.value]
+    },
+    {
+      key: 'people-delta',
+      label: '人数差值',
+      value: formatPeopleDelta(comparisonDelta.value.people),
+      valueClass: deltaClass(comparisonDelta.value.people),
+      className: 'compare-card-delta',
+      notes: [
+        comparisonDelta.value.people === 0
+          ? '人数持平'
+          : comparisonDelta.value.people > 0
+            ? '人数更高'
+            : '人数更低'
+      ]
+    },
+    {
+      key: 'average-delta',
+      label: '客单价差值',
+      value: formatAverageDelta(comparisonDelta.value.average),
+      valueClass: deltaClass(comparisonDelta.value.average),
+      className: 'compare-card-delta',
+      notes: [compareRuleText.value]
+    }
+  ];
+});
+
+const kpiCards = computed(() => [
+  {
+    key: 'wechat',
+    label: '微信收款',
+    value: money(summary.wechat.amount),
+    note: `${summary.wechat.people} 人`,
+    className: 'card-wechat'
+  },
+  {
+    key: 'alipay',
+    label: '支付宝收款',
+    value: money(summary.alipay.amount),
+    note: `${summary.alipay.people} 人`,
+    className: 'card-alipay'
+  },
+  {
+    key: 'cash',
+    label: '现金收款',
+    value: money(summary.cash.amount),
+    note: `${summary.cash.people} 人`,
+    className: 'card-cash'
+  },
+  {
+    key: 'total',
+    label: '全渠道合计',
+    value: money(summary.total.amount),
+    note: `客单价 ${averagePerPerson.value}`,
+    className: 'card-total'
+  }
+]);
+
 const shareRows = computed(() => {
   const totalAmount = Number(summary.total.amount || 0);
   const totalPeople = Number(summary.total.people || 0);
@@ -892,8 +1160,8 @@ const shareRows = computed(() => {
 });
 
 const recordFilterPeriodLabel = computed(() => (recordFilters.granularity === 'month' ? '筛选年份' : '筛选月份'));
-const recordTotalAmount = computed(() => records.value.reduce((total, item) => total + Number(item.amount || 0), 0));
-const recordTotalPeople = computed(() => records.value.reduce((total, item) => total + Number(item.people || 0), 0));
+const recordTotalAmount = computed(() => records.value.reduce((total, item) => total + Number(getEffectiveAmount(item) || 0), 0));
+const recordTotalPeople = computed(() => records.value.reduce((total, item) => total + Number(getEffectivePeople(item) || 0), 0));
 const entryDialogTitle = computed(() => (editingId.value ? '编辑收款记录' : '新增收款记录'));
 const currentUserName = computed(() => users.value.find((item) => item.id === currentUserId.value)?.name || '管理员');
 
@@ -923,7 +1191,7 @@ const rules = {
 };
 
 function switchView(view) {
-  activeView.value = view;
+  applyViewRoute(view);
 }
 
 async function loadUsers() {
@@ -989,9 +1257,8 @@ async function createUser() {
 
 function getCreateFormDefaults() {
   const granularity = recordFilters.granularity || 'day';
-  const channel = recordFilters.channel === 'all' ? importChannel.value : recordFilters.channel;
   return {
-    channel,
+    channel: DEFAULT_CREATE_CHANNEL,
     granularity,
     period: getCurrentPeriod(granularity)
   };
@@ -1002,7 +1269,7 @@ function resetForm(preserveSelection = null) {
   editingId.value = '';
 
   Object.assign(form, {
-    channel: preserveSelection?.channel || form.channel || 'wechat',
+    channel: preserveSelection?.channel || form.channel || DEFAULT_CREATE_CHANNEL,
     granularity: nextGranularity,
     period: preserveSelection?.period || form.period || getCurrentPeriod(nextGranularity),
     amount: '',
@@ -1129,6 +1396,50 @@ async function refreshRecords() {
   }
 }
 
+function exportRecords() {
+  if (records.value.length === 0) {
+    ElMessage.warning('当前筛选条件下没有可导出的数据');
+    return;
+  }
+
+  const exportRows = records.value.map((item) => ({
+    周期: formatPeriodLabel(item.granularity, item.period),
+    粒度: granularityText(item.granularity),
+    渠道: channelText(item.channel),
+    当前生效金额: Number(getEffectiveAmount(item) || 0),
+    当前生效人数: Number(getEffectivePeople(item) || 0),
+    月录入金额: Number(item.amount || 0),
+    月录入人数: Number(item.people || 0),
+    已被日汇总覆盖: item.isOverridden ? '是' : '否',
+    创建时间: formatDateTime(item.createdAt),
+    更新时间: formatDateTime(item.updatedAt)
+  }));
+
+  const sheet = XLSX.utils.json_to_sheet(exportRows);
+  sheet['!cols'] = [
+    { wch: 18 },
+    { wch: 10 },
+    { wch: 10 },
+    { wch: 14 },
+    { wch: 14 },
+    { wch: 14 },
+    { wch: 14 },
+    { wch: 14 },
+    { wch: 20 },
+    { wch: 20 }
+  ];
+
+  const workbook = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(workbook, sheet, '收款台账');
+
+  const periodLabel = recordFilters.period || '全部周期';
+  const channelLabel = recordFilters.channel === 'all' ? '全部渠道' : channelText(recordFilters.channel);
+  const filename = `收款台账_${granularityText(recordFilters.granularity)}_${periodLabel}_${channelLabel}.xlsx`;
+
+  XLSX.writeFile(workbook, filename);
+  ElMessage.success('导出完成');
+}
+
 function triggerImport() {
   importInput.value?.click();
 }
@@ -1197,12 +1508,12 @@ async function handleImportFile(event) {
       return;
     }
 
-    const result = await receiptApi.importRows({ channel: importChannel.value, rows });
+    const result = await receiptApi.importRows({ channel: DEFAULT_IMPORT_CHANNEL, rows });
     ElMessage.success(`导入成功：新增 ${result.created} 条，更新 ${result.updated} 条`);
 
     recordFilters.granularity = 'month';
     recordFilters.period = getCurrentPeriod('year');
-    activeView.value = 'entry';
+    switchView('entry');
     await Promise.all([refreshRecords(), refreshAnalytics()]);
   } catch (error) {
     ElMessage.error(error.message || '导入失败');
@@ -1238,10 +1549,9 @@ async function submitForm() {
       ElMessage.success('新增成功');
     }
 
-    importChannel.value = form.channel;
     recordFilters.granularity = form.granularity;
     recordFilters.period = getParentPeriod(form.granularity, form.period);
-    activeView.value = 'entry';
+    switchView('entry');
 
     resetForm(preservedSelection);
     closeEntryDialog();
@@ -1254,9 +1564,8 @@ async function submitForm() {
 }
 
 function startEdit(item) {
-  activeView.value = 'entry';
+  switchView('entry');
   editingId.value = item.id;
-  importChannel.value = item.channel;
 
   Object.assign(form, {
     channel: item.channel,
@@ -1441,12 +1750,20 @@ watch(
 );
 
 onMounted(async () => {
+  if (!Object.values(VIEW_ROUTE_MAP).includes(window.location.hash)) {
+    applyViewRoute(activeView.value, true);
+  } else {
+    syncViewFromHash();
+  }
+
   await loadUsers();
   await Promise.all([refreshAnalytics(), refreshRecords()]);
+  window.addEventListener('hashchange', handleHashChange);
   window.addEventListener('resize', resizeChart);
 });
 
 onBeforeUnmount(() => {
+  window.removeEventListener('hashchange', handleHashChange);
   window.removeEventListener('resize', resizeChart);
   chartInstance?.dispose();
 });
