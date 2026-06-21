@@ -338,10 +338,36 @@ input {
 
 .mobile-card-carousel {
   display: none;
+  padding-bottom: 22px;
 }
 
 .compare-mobile-carousel {
   margin-top: 18px;
+}
+
+.mobile-card-carousel .el-carousel__indicators--horizontal {
+  bottom: 1px;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.mobile-card-carousel .el-carousel__indicator--horizontal {
+  padding: 5px 3px;
+}
+
+.mobile-card-carousel .el-carousel__button {
+  width: 7px;
+  height: 7px;
+  border-radius: 999px;
+  background: var(--text-faint);
+  opacity: 0.38;
+}
+
+.mobile-card-carousel .el-carousel__indicator.is-active .el-carousel__button {
+  background: var(--brand-mint);
+  opacity: 1;
+  transform: scale(1.18);
 }
 
 .kpi-card {

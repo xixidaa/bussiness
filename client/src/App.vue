@@ -134,6 +134,7 @@
             class="mobile-card-carousel compare-mobile-carousel"
             height="126px"
             arrow="never"
+            trigger="click"
             :autoplay="false"
             @pointerdown="handleCarouselDragStart($event, 'compare')"
             @pointermove="handleCarouselDragMove($event, 'compare')"
@@ -183,6 +184,7 @@
             class="mobile-card-carousel kpi-mobile-carousel"
             height="118px"
             arrow="never"
+            trigger="click"
             :autoplay="false"
             @pointerdown="handleCarouselDragStart($event, 'kpi')"
             @pointermove="handleCarouselDragMove($event, 'kpi')"
@@ -271,6 +273,7 @@
               class="mobile-card-carousel detail-mobile-carousel"
               height="126px"
               arrow="never"
+              trigger="click"
               :autoplay="false"
               @pointerdown="handleCarouselDragStart($event, 'detail')"
               @pointermove="handleCarouselDragMove($event, 'detail')"
@@ -1009,6 +1012,11 @@ const yearCompareCards = computed(() =>
     .sort((left, right) => right.period.localeCompare(left.period))
 );
 
+const comparePaymentNotes = (targetSummary, averageText) => [
+  `客单价 ${averageText} / 现金 ${money(targetSummary.cash.amount)}`,
+  `微信 ${money(targetSummary.wechat.amount)} / 支付宝 ${money(targetSummary.alipay.amount)}`
+];
+
 const compareCards = computed(() => {
   if (analytics.dimension === 'year') {
     return yearCompareCards.value.map((item) => ({
@@ -1017,14 +1025,7 @@ const compareCards = computed(() => {
       value: money(item.summary.total.amount),
       valueClass: '',
       className: item.period === getCurrentPeriod('year') ? 'compare-card-alt' : '',
-      compactMeta: `客单价 ${formatAverage(averageFromSummary(item.summary))} | ${item.summary.total.people} 人`,
-      mobileNotes: [
-        `微信 ${money(item.summary.wechat.amount)} / 支付宝 ${money(item.summary.alipay.amount)} / 现金 ${money(item.summary.cash.amount)}`
-      ],
-      notes: [
-        `客单价 ${formatAverage(averageFromSummary(item.summary))}`,
-        `${item.summary.total.people} 人 / 微信 ${money(item.summary.wechat.amount)} / 支付宝 ${money(item.summary.alipay.amount)} / 现金 ${money(item.summary.cash.amount)}`
-      ]
+      notes: comparePaymentNotes(item.summary, formatAverage(averageFromSummary(item.summary)))
     }));
   }
 
@@ -1035,7 +1036,7 @@ const compareCards = computed(() => {
       value: selectedPeriodLabel.value,
       valueClass: '',
       className: '',
-      notes: [`客单价 ${averagePerPerson.value}`, `${money(summary.total.amount)} / ${summary.total.people} 人`]
+      notes: comparePaymentNotes(summary, averagePerPerson.value)
     },
     {
       key: 'compare',
@@ -1043,7 +1044,7 @@ const compareCards = computed(() => {
       value: comparePeriodLabel.value,
       valueClass: '',
       className: 'compare-card-alt',
-      notes: [`客单价 ${compareAveragePerPerson.value}`, `${money(compareSummary.total.amount)} / ${compareSummary.total.people} 人`]
+      notes: comparePaymentNotes(compareSummary, compareAveragePerPerson.value)
     },
     {
       key: 'amount-delta',
