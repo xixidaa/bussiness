@@ -251,6 +251,13 @@ input {
   gap: 10px;
 }
 
+.chart-title-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
 .mobile-mix-trigger {
   display: none;
 }
@@ -457,6 +464,55 @@ input {
 
 .dialog-mix-group {
   margin-top: 16px;
+  gap: 10px;
+}
+
+.dialog-mix-row {
+  display: grid;
+}
+
+.dialog-mix-track {
+  position: relative;
+  min-height: 34px;
+  border-radius: 12px;
+  background: rgba(170, 188, 203, 0.2);
+  overflow: hidden;
+}
+
+.dialog-mix-fill {
+  position: absolute;
+  inset: 0 auto 0 0;
+  min-width: 3px;
+  opacity: 0.24;
+}
+
+.dialog-mix-content {
+  position: relative;
+  z-index: 1;
+  min-height: inherit;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+}
+
+.dialog-mix-content strong {
+  font-size: 13px;
+}
+
+.dialog-mix-content span,
+.dialog-mix-content em {
+  min-width: 0;
+  color: var(--text-soft);
+  font-size: 12px;
+  font-style: normal;
+}
+
+.dialog-mix-content span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .mix-row {
@@ -805,7 +861,7 @@ input {
     padding: 8px;
     border: 1px solid rgba(255, 255, 255, 0.58);
     border-top: 0;
-    border-radius: 0 0 18px 18px;
+    border-radius: 0;
     background: rgba(255, 250, 243, 0.88);
     box-shadow: 0 14px 32px rgba(30, 41, 59, 0.14);
     backdrop-filter: blur(16px);
@@ -1039,7 +1095,7 @@ input {
   }
 
   .heading-actions {
-    width: 100%;
+    /* width: 100%; */
     justify-content: flex-start;
     flex-wrap: wrap;
   }
@@ -1067,6 +1123,16 @@ input {
 
   .section-heading h2 {
     font-size: 24px;
+  }
+
+  .chart-title-row h2 {
+    min-width: 0;
+    font-size: 22px;
+  }
+
+  .mobile-mix-trigger .el-button {
+    min-height: 34px;
+    padding-inline: 12px;
   }
 
   .analytics-grid {

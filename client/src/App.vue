@@ -232,11 +232,13 @@
             <div class="section-heading compact">
               <div>
                 <span class="section-kicker">Trend</span>
-                <h2>{{ chartTitle }}</h2>
+                <div class="chart-title-row">
+                  <h2>{{ chartTitle }}</h2>
+                  <div class="heading-actions mobile-mix-trigger">
+                    <el-button @click="channelStructureDialogVisible = true">渠道结构</el-button>
+                  </div>
+                </div>
                 <p>帮助快速判断不同渠道的收款波动与经营节奏。</p>
-              </div>
-              <div class="heading-actions mobile-mix-trigger">
-                <el-button @click="channelStructureDialogVisible = true">渠道结构</el-button>
               </div>
             </div>
             <div ref="chartRef" class="chart-box"></div>
@@ -273,15 +275,15 @@
           >
             <p class="dialog-helper">查看当前周期下各渠道的金额和到店人数贡献。</p>
             <div class="mix-group dialog-mix-group">
-              <div v-for="item in shareRows" :key="`dialog-${item.key}`" class="mix-row">
-                <div class="mix-label">
-                  <strong>{{ item.label }}</strong>
-                  <span>{{ item.value }}</span>
+              <div v-for="item in shareRows" :key="`dialog-${item.key}`" class="dialog-mix-row">
+                <div class="dialog-mix-track">
+                  <div class="dialog-mix-fill" :style="{ width: `${item.percent}%`, background: item.color }"></div>
+                  <div class="dialog-mix-content">
+                    <strong>{{ item.label }}</strong>
+                    <span>{{ item.value }}</span>
+                    <em>{{ item.percent }}%</em>
+                  </div>
                 </div>
-                <div class="mix-track">
-                  <div class="mix-fill" :style="{ width: `${item.percent}%`, background: item.color }"></div>
-                </div>
-                <em>{{ item.percent }}%</em>
               </div>
             </div>
           </el-dialog>
