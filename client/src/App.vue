@@ -235,6 +235,9 @@
                 <h2>{{ chartTitle }}</h2>
                 <p>帮助快速判断不同渠道的收款波动与经营节奏。</p>
               </div>
+              <div class="heading-actions mobile-mix-trigger">
+                <el-button @click="channelStructureDialogVisible = true">渠道结构</el-button>
+              </div>
             </div>
             <div ref="chartRef" class="chart-box"></div>
           </section>
@@ -261,6 +264,27 @@
               </div>
             </div>
           </section>
+
+          <el-dialog
+            v-model="channelStructureDialogVisible"
+            title="渠道结构"
+            width="min(92vw, 420px)"
+            class="channel-structure-dialog"
+          >
+            <p class="dialog-helper">查看当前周期下各渠道的金额和到店人数贡献。</p>
+            <div class="mix-group dialog-mix-group">
+              <div v-for="item in shareRows" :key="`dialog-${item.key}`" class="mix-row">
+                <div class="mix-label">
+                  <strong>{{ item.label }}</strong>
+                  <span>{{ item.value }}</span>
+                </div>
+                <div class="mix-track">
+                  <div class="mix-fill" :style="{ width: `${item.percent}%`, background: item.color }"></div>
+                </div>
+                <em>{{ item.percent }}%</em>
+              </div>
+            </div>
+          </el-dialog>
 
           <section class="panel detail-panel">
             <div class="section-heading compact">
@@ -668,6 +692,7 @@ const saving = ref(false);
 const importing = ref(false);
 const editingId = ref('');
 const entryDialogVisible = ref(false);
+const channelStructureDialogVisible = ref(false);
 const showStickyViewNav = ref(false);
 const pagination = reactive({
   currentPage: 1,

@@ -251,6 +251,10 @@ input {
   gap: 10px;
 }
 
+.mobile-mix-trigger {
+  display: none;
+}
+
 .toolbar-grid {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
@@ -449,6 +453,10 @@ input {
 .mix-group {
   display: grid;
   gap: 18px;
+}
+
+.dialog-mix-group {
+  margin-top: 16px;
 }
 
 .mix-row {
@@ -787,7 +795,7 @@ input {
 
   .sticky-view-nav {
     position: fixed;
-    top: max(8px, env(safe-area-inset-top));
+    top: 0;
     left: 50%;
     z-index: 40;
     width: min(100%, calc(100% - 24px));
@@ -796,7 +804,8 @@ input {
     gap: 8px;
     padding: 8px;
     border: 1px solid rgba(255, 255, 255, 0.58);
-    border-radius: 18px;
+    border-top: 0;
+    border-radius: 0 0 18px 18px;
     background: rgba(255, 250, 243, 0.88);
     box-shadow: 0 14px 32px rgba(30, 41, 59, 0.14);
     backdrop-filter: blur(16px);
@@ -853,6 +862,14 @@ input {
     width: auto;
     min-height: 34px;
     padding-inline: 12px;
+  }
+
+  .mobile-mix-trigger {
+    display: flex;
+  }
+
+  .insight-panel {
+    display: none;
   }
 
   .desktop-card-grid {
