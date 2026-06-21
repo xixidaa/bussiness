@@ -151,6 +151,10 @@ input {
   align-items: center;
 }
 
+.view-tabs {
+  display: contents;
+}
+
 .view-chip {
   width: 100%;
   border: 0;
@@ -186,6 +190,10 @@ input {
     linear-gradient(135deg, rgba(236, 154, 100, 0.16), rgba(68, 190, 175, 0.12)),
     rgba(255, 255, 255, 0.95);
   box-shadow: inset 0 0 0 1px rgba(201, 115, 69, 0.24), 0 16px 30px rgba(201, 115, 69, 0.16);
+}
+
+.sticky-view-nav {
+  display: none;
 }
 
 .panel,
@@ -338,7 +346,6 @@ input {
 
 .mobile-card-carousel {
   display: none;
-  padding-bottom: 22px;
 }
 
 .compare-mobile-carousel {
@@ -776,6 +783,39 @@ input {
     grid-template-columns: repeat(2, minmax(0, 1fr));
     gap: 8px;
     padding: 10px;
+  }
+
+  .sticky-view-nav {
+    position: fixed;
+    top: max(8px, env(safe-area-inset-top));
+    left: 50%;
+    z-index: 40;
+    width: min(100%, calc(100% - 24px));
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 8px;
+    padding: 8px;
+    border: 1px solid rgba(255, 255, 255, 0.58);
+    border-radius: 18px;
+    background: rgba(255, 250, 243, 0.88);
+    box-shadow: 0 14px 32px rgba(30, 41, 59, 0.14);
+    backdrop-filter: blur(16px);
+    opacity: 0;
+    pointer-events: none;
+    transform: translate(-50%, -120%);
+    transition: opacity 0.2s ease, transform 0.2s ease;
+  }
+
+  .sticky-view-nav.visible {
+    opacity: 1;
+    pointer-events: auto;
+    transform: translate(-50%, 0);
+  }
+
+  .sticky-view-nav .view-chip {
+    min-height: 42px;
+    padding: 9px 12px;
+    border-radius: 12px;
   }
 
   .view-chip {

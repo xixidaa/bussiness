@@ -9,18 +9,20 @@
         </p>
       </div>
 
-      <div class="hero-switcher">
-        <button
-          v-for="item in viewOptions"
-          :key="item.value"
-          type="button"
-          class="view-chip"
-          :class="{ active: activeView === item.value }"
-          @click="switchView(item.value)"
-        >
-          <strong>{{ item.label }}</strong>
-          <span>{{ item.desc }}</span>
-        </button>
+      <div ref="heroSwitcherRef" class="hero-switcher">
+        <nav class="view-tabs" aria-label="页面切换">
+          <button
+            v-for="item in viewOptions"
+            :key="item.value"
+            type="button"
+            class="view-chip"
+            :class="{ active: activeView === item.value }"
+            @click="switchView(item.value)"
+          >
+            <strong>{{ item.label }}</strong>
+            <span>{{ item.desc }}</span>
+          </button>
+        </nav>
 
         <div class="user-panel" v-loading="usersLoading" element-loading-text="正在加载用户，请稍后...">
           <div class="user-panel-heading">
@@ -46,6 +48,24 @@
         </div>
       </div>
     </header>
+
+    <nav
+      class="sticky-view-nav"
+      :class="{ visible: showStickyViewNav }"
+      :aria-hidden="!showStickyViewNav"
+      aria-label="页面快速切换"
+    >
+      <button
+        v-for="item in viewOptions"
+        :key="`sticky-${item.value}`"
+        type="button"
+        class="view-chip"
+        :class="{ active: activeView === item.value }"
+        @click="switchView(item.value)"
+      >
+        <strong>{{ item.label }}</strong>
+      </button>
+    </nav>
 
     <main class="workspace">
       <section
@@ -597,6 +617,7 @@ function defaultCompareYears() {
 
 const activeView = ref('analytics');
 const formRef = ref();
+const heroSwitcherRef = ref();
 const chartRef = ref();
 const compareCarouselRef = ref();
 const kpiCarouselRef = ref();
@@ -647,10 +668,13 @@ const saving = ref(false);
 const importing = ref(false);
 const editingId = ref('');
 const entryDialogVisible = ref(false);
+const showStickyViewNav = ref(false);
 const pagination = reactive({
   currentPage: 1,
   pageSize: 10
 });
+
+let heroSwitcherObserver;
 const carouselDrag = reactive({
   target: '',
   startX: 0,
@@ -1193,6 +1217,18 @@ const rules = {
 
 function switchView(view) {
   applyViewRoute(view);
+}
+
+function setupStickyViewNav() {
+  if (!heroSwitcherRef.value || !('IntersectionObserver' in window)) return;
+
+  heroSwitcherObserver = new IntersectionObserver(
+    ([entry]) => {
+      showStickyViewNav.value = !entry.isIntersecting;
+    },
+    { threshold: 0 }
+  );
+  heroSwitcherObserver.observe(heroSwitcherRef.value);
 }
 
 async function loadUsers() {
@@ -1757,6 +1793,7 @@ onMounted(async () => {
     syncViewFromHash();
   }
 
+  setupStickyViewNav();
   await loadUsers();
   await Promise.all([refreshAnalytics(), refreshRecords()]);
   window.addEventListener('hashchange', handleHashChange);
@@ -1766,6 +1803,7 @@ onMounted(async () => {
 onBeforeUnmount(() => {
   window.removeEventListener('hashchange', handleHashChange);
   window.removeEventListener('resize', resizeChart);
+  heroSwitcherObserver?.disconnect();
   chartInstance?.dispose();
 });
 </script>
