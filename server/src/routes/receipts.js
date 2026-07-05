@@ -4,7 +4,7 @@ import { DEFAULT_USER, readReceipts, writeReceipts } from '../storage.js';
 
 const router = express.Router();
 
-const CHANNELS = new Set(['wechat', 'alipay', 'cash']);
+const CHANNELS = new Set(['wechat', 'alipay', 'cash', 'other']);
 const ANALYTICS_GRANULARITIES = new Set(['year', 'month', 'day']);
 const ENTRY_GRANULARITIES = new Set(['month', 'day']);
 const PERIOD_PATTERNS = {
@@ -74,6 +74,9 @@ function normalizeReceipt(item) {
     date: item.date || buildDate(granularity, period),
     amount: Math.round(Number(item.amount || 0) * 100) / 100,
     people: Number(item.people || 0),
+    entryMode: item.entryMode === 'import' ? 'import' : 'manual',
+    remark: String(item.remark || '').slice(0, 200),
+    attachmentStatus: ['none', 'uploaded', 'pending'].includes(item.attachmentStatus) ? item.attachmentStatus : 'none',
     createdAt: item.createdAt || new Date().toISOString(),
     updatedAt: item.updatedAt || item.createdAt || new Date().toISOString()
   };
@@ -108,10 +111,12 @@ function summarizeReceipts(receipts) {
     wechat: { amount: 0, people: 0 },
     alipay: { amount: 0, people: 0 },
     cash: { amount: 0, people: 0 },
+    other: { amount: 0, people: 0 },
     total: { amount: 0, people: 0 }
   };
 
   for (const item of receipts) {
+    if (!summary[item.channel]) continue;
     summary[item.channel].amount += Number(item.amount);
     summary[item.channel].people += Number(item.people);
     summary.total.amount += Number(item.amount);
@@ -263,10 +268,10 @@ function validateEntryPayload(body) {
   const people = Number(body.people);
 
   if (!granularity) errors.push('录入粒度必须为 month 或 day');
-  if (!channel) errors.push('渠道必须为 wechat、alipay 或 cash');
+  if (!channel) errors.push('渠道必须为 wechat、alipay、cash 或 other');
   if (!period) errors.push('周期格式与粒度不匹配');
   if (!Number.isFinite(amount) || amount <= 0) errors.push('收款金额必须为正数');
-  if (!Number.isInteger(people) || people <= 0) errors.push('收款人数必须为正整数');
+  if (!Number.isInteger(people) || people < 0) errors.push('收款人数不可为负');
 
   return {
     errors,
@@ -276,7 +281,10 @@ function validateEntryPayload(body) {
       period,
       date: granularity && period ? buildDate(granularity, period) : null,
       amount: Math.round(amount * 100) / 100,
-      people
+      people,
+      entryMode: body.entryMode === 'import' ? 'import' : 'manual',
+      remark: String(body.remark || '').trim().slice(0, 200),
+      attachmentStatus: ['none', 'uploaded', 'pending'].includes(body.attachmentStatus) ? body.attachmentStatus : 'none'
     }
   };
 }
@@ -293,33 +301,39 @@ function hasDayDataForMonth(receipts, channel, monthPeriod, ignoreId = '') {
 
 function validateImportPayload(body) {
   const errors = [];
-  const channel = normalizeChannel(body.channel);
   const rows = Array.isArray(body.rows) ? body.rows : [];
 
-  if (!channel) errors.push('导入渠道必须为 wechat、alipay 或 cash');
   if (rows.length === 0) errors.push('导入数据不能为空');
   if (rows.length > 500) errors.push('单次最多导入 500 行');
 
-  const seenPeriods = new Set();
+  const seenKeys = new Set();
   const values = rows.map((row, index) => {
     const rowNumber = index + 2;
-    const period = normalizePeriod('month', String(row.period || row.month || '').trim());
+    const granularity = normalizeGranularity(row.granularity || 'month', ENTRY_GRANULARITIES);
+    const channel = normalizeChannel(row.channel || body.channel);
+    const period = normalizePeriod(granularity, String(row.period || row.month || '').trim());
     const amount = Number(row.amount);
     const people = Number(row.people);
+    const duplicateKey = `${granularity || ''}__${channel || ''}__${period || ''}`;
 
-    if (!period) errors.push(`第 ${rowNumber} 行月份格式应为 YYYY-MM`);
+    if (!granularity) errors.push(`第 ${rowNumber} 行粒度必须为 month 或 day`);
+    if (!channel) errors.push(`第 ${rowNumber} 行渠道必须为 wechat、alipay、cash 或 other`);
+    if (!period) errors.push(`第 ${rowNumber} 行日期格式与粒度不匹配`);
     if (!Number.isFinite(amount) || amount <= 0) errors.push(`第 ${rowNumber} 行金额必须大于 0`);
-    if (!Number.isInteger(people) || people <= 0) errors.push(`第 ${rowNumber} 行人数必须为正整数`);
-    if (period && seenPeriods.has(period)) errors.push(`第 ${rowNumber} 行月份 ${period} 重复`);
-    if (period) seenPeriods.add(period);
+    if (!Number.isInteger(people) || people < 0) errors.push(`第 ${rowNumber} 行人数不可为负`);
+    if (period && channel && granularity && seenKeys.has(duplicateKey)) errors.push(`第 ${rowNumber} 行记录重复`);
+    if (period && channel && granularity) seenKeys.add(duplicateKey);
 
     return {
       channel,
-      granularity: 'month',
+      granularity,
       period,
-      date: period ? buildDate('month', period) : null,
+      date: granularity && period ? buildDate(granularity, period) : null,
       amount: Math.round(amount * 100) / 100,
-      people
+      people,
+      entryMode: 'import',
+      remark: String(row.remark || '').trim().slice(0, 200),
+      attachmentStatus: ['none', 'uploaded', 'pending'].includes(row.attachmentStatus) ? row.attachmentStatus : 'none'
     };
   });
 
@@ -335,7 +349,7 @@ router.get('/', async (req, res, next) => {
     const parentPeriod = req.query.parentPeriod || '';
 
     if (req.query.granularity && !granularity) return fail(res, 400, '录入台账仅支持 month 或 day');
-    if (req.query.channel && !channel) return fail(res, 400, '渠道必须为 wechat、alipay 或 cash');
+    if (req.query.channel && !channel) return fail(res, 400, '渠道必须为 wechat、alipay、cash 或 other');
     if (req.query.period && !period) return fail(res, 400, '周期格式与粒度不匹配');
     if (granularity && !validateParentPeriod(granularity, parentPeriod)) return fail(res, 400, '父级周期格式不正确');
 
@@ -384,7 +398,7 @@ router.get('/single', async (req, res, next) => {
     const period = normalizePeriod(granularity, req.query.period);
 
     if (!granularity) return fail(res, 400, '录入台账仅支持 month 或 day');
-    if (!channel) return fail(res, 400, '渠道必须为 wechat、alipay 或 cash');
+    if (!channel) return fail(res, 400, '渠道必须为 wechat、alipay、cash 或 other');
     if (!period) return fail(res, 400, '周期格式与粒度不匹配');
 
     const receipts = await getUserReceipts(userId);
@@ -490,7 +504,7 @@ router.post('/import', async (req, res, next) => {
 
     const allReceipts = await getSourceReceipts();
     const receipts = allReceipts.filter((item) => item.userId === userId);
-    const blocked = values.filter((item) => hasDayDataForMonth(receipts, item.channel, item.period));
+    const blocked = values.filter((item) => item.granularity === 'month' && hasDayDataForMonth(receipts, item.channel, item.period));
     if (blocked.length) {
       return fail(res, 409, `以下月份已有日数据，不能导入月数据：${blocked.map((item) => item.period).join('、')}`);
     }

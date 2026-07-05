@@ -1,0 +1,15 @@
+
+> merchant-receipt-statistics@1.0.0 dev:client
+> npm run dev --prefix client
+
+
+> merchant-receipt-statistics-client@1.0.0 dev
+> vite --host 0.0.0.0
+
+
+  [32m[1mVITE[22m v5.4.21[39m  [2mready in [0m[1m612[22m[2m[0m ms[22m
+
+  [32m➜[39m  [1mLocal[22m:   [36mhttp://localhost:[1m5173[22m/[39m
+  [32m➜[39m  [1mNetwork[22m: [36mhttp://10.205.75.243:[1m5173[22m/[39m
+[2m00:29:05[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/styles.css[22m
+[2m00:29:55[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/styles.css[22m

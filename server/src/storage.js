@@ -21,12 +21,15 @@ const receiptSchema = new mongoose.Schema(
   {
     id: { type: String, required: true, unique: true },
     userId: { type: String, required: true, default: DEFAULT_USER.id, index: true },
-    channel: { type: String, required: true, enum: ['wechat', 'alipay', 'cash'] },
+    channel: { type: String, required: true, enum: ['wechat', 'alipay', 'cash', 'other'] },
     granularity: { type: String, required: true, enum: ['year', 'month', 'day'] },
     period: { type: String, required: true },
     date: { type: String, required: true },
     amount: { type: Number, required: true },
     people: { type: Number, required: true },
+    entryMode: { type: String, required: true, default: 'manual', enum: ['manual', 'import'] },
+    remark: { type: String, default: '' },
+    attachmentStatus: { type: String, required: true, default: 'none', enum: ['none', 'uploaded', 'pending'] },
     createdAt: { type: String, required: true },
     updatedAt: { type: String, required: true }
   },
