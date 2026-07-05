@@ -296,7 +296,7 @@
               <el-table-column prop="updatedAt" label="更新时间" min-width="160">
                 <template #default="{ row }">{{ formatDateTime(row.updatedAt) }}</template>
               </el-table-column>
-              <el-table-column label="操作" width="128" fixed="right">
+              <el-table-column label="操作" width="260" fixed="right">
                 <template #default="{ row }">
                   <el-button text type="primary" @click="startEdit(row)">编辑</el-button>
                   <el-popconfirm title="确认删除这条记录吗？" @confirm="deleteItem(row.id)">
@@ -807,6 +807,11 @@ const logFilters = reactive({
 
 const activeMeta = computed(() => navItems.find((item) => item.value === activeView.value) || navItems[0]);
 const enabledChannelOptions = computed(() => channelOptions.filter((item) => settings.channels[item.value]));
+const dashboardChannelOptions = computed(() => (
+  analytics.channel === 'all'
+    ? channelOptions
+    : channelOptions.filter((item) => item.value === analytics.channel)
+));
 const channelFilterOptions = computed(() => [{ value: 'all', label: '全部渠道' }, ...enabledChannelOptions.value]);
 const yearOptions = computed(() => {
   const year = new Date().getFullYear();
@@ -841,7 +846,7 @@ const visibleTrendRows = computed(() => trendRows.value.map((item) => ({ ...item
 const metricCards = computed(() => {
   const current = visibleSummary.value;
   return [
-    { key: 'today', label: '今日收款金额', value: money(coreSummary.today.total.amount), note: `${coreSummary.today.total.people} 人 · 适合移动端首屏查看`, className: 'card-green' },
+    { key: 'today', label: '今日收款金额', value: money(coreSummary.today.total.amount), note: `${coreSummary.today.total.people} 人 `, className: 'card-green' },
     { key: 'month', label: '本月收款金额', value: money(coreSummary.month.total.amount), note: `本月 ${coreSummary.month.total.people} 人`, className: 'card-blue' },
     { key: 'year', label: '本年收款金额', value: money(coreSummary.year.total.amount), note: `本年 ${coreSummary.year.total.people} 人`, className: 'card-amber' },
     { key: 'period', label: '当前筛选客单价', value: formatAverage(averageFromSummary(current)), note: buildDeltaNote(current.total.amount, visibleCompareSummary.value.total.amount), className: 'card-rose' }
@@ -851,7 +856,7 @@ const metricCards = computed(() => {
 const shareRows = computed(() => {
   const data = visibleSummary.value;
   const total = Math.max(Number(data.total.amount || 0), 0);
-  return enabledChannelOptions.value.map((item) => {
+  return dashboardChannelOptions.value.map((item) => {
     const amount = Number(data[item.value]?.amount || 0);
     return {
       key: item.value,
@@ -903,7 +908,7 @@ const anomalyRows = computed(() => {
       rows.push({ key: 'drop', level: 'danger', title: '金额突降', desc: `${formatPeriodLabel(analytics.dimension, latest.period)} 较上一周期下降 ${Math.round(drop * 100)}%` });
     }
   }
-  for (const item of enabledChannelOptions.value) {
+  for (const item of dashboardChannelOptions.value) {
     const value = Number(visibleSummary.value[item.value]?.amount || 0);
     if (visibleSummary.value.total.amount > 0 && value === 0) {
       rows.push({ key: `channel-${item.value}`, level: 'warning', title: `${item.label}渠道异常`, desc: '当前周期无收款金额，请确认是否漏录或渠道停用。' });
@@ -1087,14 +1092,20 @@ function saveUserProfiles() {
 
 function saveSettings() {
   writeJson(SETTINGS_KEY, settings);
+  if (analytics.channel !== 'all' && !settings.channels[analytics.channel]) analytics.channel = 'all';
+  if (recordFilters.channel !== 'all' && !settings.channels[recordFilters.channel]) recordFilters.channel = 'all';
+  if (importWizard.uniformChannel && !settings.channels[importWizard.uniformChannel]) {
+    importWizard.uniformChannel = enabledChannelOptions.value[0]?.value || 'wechat';
+  }
   if (!settings.channels[form.channel]) form.channel = enabledChannelOptions.value[0]?.value || 'wechat';
+  nextTick(renderCharts);
   addOperationLog('系统配置', '更新渠道、门店或默认统计口径');
 }
 
 function switchView(view) {
   activeView.value = view;
   window.location.hash = view;
-  if (view === 'dashboard') nextTick(renderCharts);
+  if (view === 'dashboard') nextTick(() => requestAnimationFrame(renderCharts));
 }
 
 function openCreate() {
@@ -1398,7 +1409,7 @@ function exportDashboard() {
     { 指标: '当前周期金额', 值: visibleSummary.value.total.amount },
     { 指标: '当前周期人数', 值: visibleSummary.value.total.people },
     { 指标: '当前客单价', 值: averageFromSummary(visibleSummary.value) },
-    ...enabledChannelOptions.value.map((item) => ({
+    ...dashboardChannelOptions.value.map((item) => ({
       指标: `${item.label}金额`,
       值: visibleSummary.value[item.value]?.amount || 0
     }))
@@ -1568,17 +1579,31 @@ function renderCharts() {
   renderMixChart();
 }
 
+function ensureChartInstance(instance, element) {
+  if (!element) return null;
+  if (!element.clientWidth || !element.clientHeight) {
+    requestAnimationFrame(renderCharts);
+    return null;
+  }
+  if (!instance || instance.getDom() !== element) {
+    instance?.dispose();
+    return echarts.init(element);
+  }
+  return instance;
+}
+
 function renderTrendChart() {
   const element = trendChartRef.value;
   if (!element) return;
-  if (!trendChart) trendChart = echarts.init(element);
+  trendChart = ensureChartInstance(trendChart, element);
+  if (!trendChart) return;
   const unit = analytics.metric === 'amount' ? '元' : '人';
   const rows = visibleTrendRows.value;
   const seriesFor = (channel) => rows.map((item) => Number(item.summary?.[channel]?.[analytics.metric] || 0));
   trendChart.setOption({
     color: ['#0f766e', '#2563eb', '#f97316', '#7c3aed', '#111827'],
     tooltip: { trigger: 'axis', valueFormatter: (value) => `${value}${unit}` },
-    legend: { top: 0, data: [...enabledChannelOptions.value.map((item) => item.label), '合计'] },
+    legend: { top: 0, data: [...dashboardChannelOptions.value.map((item) => item.label), '合计'] },
     grid: { top: 48, left: 12, right: 18, bottom: 14, containLabel: true },
     xAxis: {
       type: 'category',
@@ -1594,7 +1619,7 @@ function renderTrendChart() {
     },
     yAxis: { type: 'value', axisLabel: { formatter: (value) => `${value}${unit}` } },
     series: [
-      ...enabledChannelOptions.value.map((item) => ({ name: item.label, type: 'line', smooth: true, data: seriesFor(item.value) })),
+      ...dashboardChannelOptions.value.map((item) => ({ name: item.label, type: 'line', smooth: true, data: seriesFor(item.value) })),
       { name: '合计', type: 'line', smooth: true, lineStyle: { type: 'dashed', width: 3 }, data: rows.map((item) => Number(item.summary?.total?.[analytics.metric] || 0)) }
     ]
   }, true);
@@ -1604,7 +1629,8 @@ function renderTrendChart() {
 function renderMixChart() {
   const element = mixChartRef.value;
   if (!element) return;
-  if (!mixChart) mixChart = echarts.init(element);
+  mixChart = ensureChartInstance(mixChart, element);
+  if (!mixChart) return;
   const total = shareRows.value.reduce((sum, item) => sum + Number(item.value || 0), 0);
   mixChart.setOption({
     color: ['#0f766e', '#2563eb', '#f97316', '#7c3aed'],

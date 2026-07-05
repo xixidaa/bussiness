@@ -81,7 +81,7 @@ input {
 
 .brand-block strong,
 .brand-block small,
-.current-user span,
+.current-user > span,
 .nav-item span,
 .nav-item small {
   display: block;
@@ -142,15 +142,17 @@ input {
   border-top: 1px solid rgba(255, 255, 255, 0.14);
 }
 
-.current-user span {
+.current-user > span {
   color: rgba(248, 250, 252, 0.66);
   font-size: 12px;
 }
 
 .current-user .el-select__selected-item,
+.current-user .el-select__selected-item span,
 .current-user .el-select__placeholder,
+.current-user .el-select__placeholder span,
 .current-user .el-input__inner {
-  color: var(--ink);
+  color: var(--ink) !important;
 }
 
 .main-shell {
