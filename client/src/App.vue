@@ -116,7 +116,7 @@
           <section class="dashboard-grid">
             <article class="panel chart-panel">
               <div class="panel-heading">
-                <div>
+                <div style="width: 120px">
                   <span class="eyebrow">Trend</span>
                   <h2>收款趋势</h2>
                 </div>
