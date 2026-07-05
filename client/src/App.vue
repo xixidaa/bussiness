@@ -1,5 +1,86 @@
 <template>
-  <div class="app-shell">
+  <div v-if="!isLoggedIn" class="login-shell">
+    <section class="login-backdrop" aria-label="产品概览">
+      <div class="brand-block login-hero-brand">
+        <span class="brand-mark">收</span>
+        <div>
+          <strong>商家收款台账</strong>
+          <small>门店收款、台账、导入与异常核对</small>
+        </div>
+      </div>
+      <div class="login-hero-copy">
+        <span class="eyebrow">Revenue Workspace</span>
+        <h1>把每天的收款录清楚，把经营变化看明白。</h1>
+        <p>移动端快速录入，PC 端高效筛选、导出和核对，适合老板随时掌握门店现金流。</p>
+      </div>
+      <div class="login-preview">
+        <div class="preview-bar">
+          <span>今日</span>
+          <strong>¥8,426</strong>
+        </div>
+        <div class="preview-lines">
+          <i style="width: 76%"></i>
+          <i style="width: 58%"></i>
+          <i style="width: 88%"></i>
+          <i style="width: 42%"></i>
+        </div>
+        <div class="preview-grid">
+          <span>微信 52%</span>
+          <span>支付宝 41%</span>
+          <span>现金 7%</span>
+        </div>
+      </div>
+    </section>
+
+    <section class="login-card">
+      <div class="login-copy">
+        <span class="eyebrow">{{ authMode === 'login' ? 'Login' : 'Register' }}</span>
+        <h1>{{ authMode === 'login' ? '登录系统' : '注册账号' }}</h1>
+        <p>{{ authMode === 'login' ? '未登录无法查看看板、台账和导入数据。' : '创建账号后会自动进入系统。' }}</p>
+      </div>
+
+      <el-segmented v-model="authMode" :options="authModeOptions" />
+
+      <el-form label-position="top" @submit.prevent>
+        <el-form-item label="账号">
+          <el-input v-model="authForm.account" size="large" maxlength="24" placeholder="请输入账号名称" />
+        </el-form-item>
+        <el-form-item label="密码">
+          <el-input
+            v-model="authForm.password"
+            size="large"
+            type="password"
+            show-password
+            placeholder="请输入密码"
+            @keyup.enter="authMode === 'login' ? login() : register()"
+          />
+        </el-form-item>
+        <el-form-item v-if="authMode === 'register'" label="确认密码">
+          <el-input
+            v-model="authForm.confirmPassword"
+            size="large"
+            type="password"
+            show-password
+            placeholder="再次输入密码"
+            @keyup.enter="register"
+          />
+        </el-form-item>
+      </el-form>
+
+      <el-button
+        type="primary"
+        size="large"
+        class="login-button"
+        :loading="loginLoading"
+        @click="authMode === 'login' ? login() : register()"
+      >
+        {{ authMode === 'login' ? '登录' : '注册并进入' }}
+      </el-button>
+      <p class="login-tip">默认管理员：账号“管理员”，密码“admin123”。</p>
+    </section>
+  </div>
+
+  <div v-else class="app-shell">
     <aside class="side-nav">
       <div class="brand-block">
         <span class="brand-mark">收</span>
@@ -35,6 +116,10 @@
             :disabled="userProfile(item.id).status === 'disabled'"
           />
         </el-select>
+        <el-button class="logout-button" @click="logout">
+          <el-icon><SwitchButton /></el-icon>
+          注销
+        </el-button>
       </div>
     </aside>
 
@@ -519,7 +604,7 @@
               <el-table-column label="授权范围" min-width="180">
                 <template #default="{ row }">{{ roleScopeText(row.profile.role) }}</template>
               </el-table-column>
-              <el-table-column label="状态" width="130">
+              <el-table-column label="状态" width="180">
                 <template #default="{ row }">
                   <el-switch
                     v-model="row.profile.status"
@@ -669,6 +754,7 @@ import {
   Refresh,
   Search,
   Setting,
+  SwitchButton,
   Tickets,
   Upload,
   User,
@@ -716,8 +802,15 @@ const metricOptions = [
   { label: '人数', value: 'people' }
 ];
 
+const authModeOptions = [
+  { label: '登录', value: 'login' },
+  { label: '注册', value: 'register' }
+];
+
 const activeView = ref('dashboard');
-const currentUserId = ref(localStorage.getItem(USER_STORAGE_KEY) || DEFAULT_USER_ID);
+const savedUserId = localStorage.getItem(USER_STORAGE_KEY) || '';
+const isLoggedIn = ref(Boolean(savedUserId));
+const currentUserId = ref(savedUserId);
 const users = ref([]);
 const records = ref([]);
 const trendRows = ref([]);
@@ -736,6 +829,7 @@ const analyticsLoading = ref(false);
 const recordsLoading = ref(false);
 const saving = ref(false);
 const importing = ref(false);
+const loginLoading = ref(false);
 const userSaving = ref(false);
 const userDialogVisible = ref(false);
 
@@ -797,6 +891,8 @@ const importWizard = reactive({
 });
 
 const userForm = reactive({ name: '' });
+const authMode = ref('login');
+const authForm = reactive({ account: '', password: '', confirmPassword: '' });
 const editingId = ref('');
 
 const logFilters = reactive({
@@ -1182,15 +1278,99 @@ async function loadUsers() {
     ElMessage.error(error.message || '加载用户失败');
   }
 
-  if (!users.value.some((item) => item.id === currentUserId.value && userProfile(item.id).status !== 'disabled')) {
-    currentUserId.value = users.value.find((item) => userProfile(item.id).status !== 'disabled')?.id || DEFAULT_USER_ID;
+  const firstEnabledId = users.value.find((item) => userProfile(item.id).status !== 'disabled')?.id || DEFAULT_USER_ID;
+  if (isLoggedIn.value) {
+    if (!users.value.some((item) => item.id === currentUserId.value && userProfile(item.id).status !== 'disabled')) {
+      currentUserId.value = firstEnabledId;
+    }
+    setActiveUserId(currentUserId.value);
   }
-  setActiveUserId(currentUserId.value);
-  localStorage.setItem(USER_STORAGE_KEY, currentUserId.value);
+}
+
+async function login() {
+  if (!authForm.account.trim() || !authForm.password) {
+    ElMessage.warning('请输入账号和密码');
+    return;
+  }
+
+  loginLoading.value = true;
+  try {
+    const user = await userApi.login({
+      account: authForm.account.trim(),
+      password: authForm.password
+    });
+    currentUserId.value = user.id;
+    isLoggedIn.value = true;
+    setActiveUserId(user.id);
+    localStorage.setItem(USER_STORAGE_KEY, user.id);
+    addOperationLog('登录', `用户 ${user.name} 登录系统`);
+    await refreshAll();
+    ElMessage.success('登录成功');
+  } catch (error) {
+    ElMessage.error(error.message || '登录失败');
+  } finally {
+    loginLoading.value = false;
+  }
+}
+
+async function register() {
+  const name = authForm.account.trim();
+  if (!name || !authForm.password) {
+    ElMessage.warning('请输入账号和密码');
+    return;
+  }
+  if (authForm.password.length < 6) {
+    ElMessage.warning('密码至少 6 位');
+    return;
+  }
+  if (authForm.password !== authForm.confirmPassword) {
+    ElMessage.warning('两次输入的密码不一致');
+    return;
+  }
+
+  loginLoading.value = true;
+  try {
+    const user = await userApi.create({ name, password: authForm.password });
+    await loadUsers();
+    currentUserId.value = user.id;
+    isLoggedIn.value = true;
+    setActiveUserId(user.id);
+    localStorage.setItem(USER_STORAGE_KEY, user.id);
+    userProfile(user.id).role = 'clerk';
+    userProfile(user.id).status = 'enabled';
+    saveUserProfiles();
+    addOperationLog('注册', `用户 ${user.name} 注册并登录系统`);
+    await refreshAll();
+    ElMessage.success('注册成功');
+  } catch (error) {
+    ElMessage.error(error.message || '注册失败');
+  } finally {
+    loginLoading.value = false;
+  }
+}
+
+function logout() {
+  addOperationLog('注销', `用户 ${users.value.find((item) => item.id === currentUserId.value)?.name || currentUserId.value} 注销系统`);
+  isLoggedIn.value = false;
+  currentUserId.value = '';
+  authMode.value = 'login';
+  authForm.password = '';
+  authForm.confirmPassword = '';
+  setActiveUserId('');
+  localStorage.removeItem(USER_STORAGE_KEY);
+  records.value = [];
+  trendRows.value = [];
+  selectedRows.value = [];
+  trendChart?.dispose();
+  mixChart?.dispose();
+  trendChart = null;
+  mixChart = null;
+  ElMessage.success('已注销');
 }
 
 async function handleUserChange(userId) {
-  currentUserId.value = userId || DEFAULT_USER_ID;
+  if (!userId) return;
+  currentUserId.value = userId;
   setActiveUserId(currentUserId.value);
   localStorage.setItem(USER_STORAGE_KEY, currentUserId.value);
   addOperationLog('登录/切换', `切换到用户 ${users.value.find((item) => item.id === currentUserId.value)?.name || currentUserId.value}`);
@@ -1206,7 +1386,7 @@ async function createUser() {
 
   userSaving.value = true;
   try {
-    const user = await userApi.create({ name });
+    const user = await userApi.create({ name, password: '123456' });
     userProfile(user.id).role = 'clerk';
     userProfile(user.id).status = 'enabled';
     saveUserProfiles();
@@ -1228,10 +1408,12 @@ function openUserDialog() {
 }
 
 async function refreshAll() {
+  if (!isLoggedIn.value) return;
   await Promise.all([refreshAnalytics(), refreshRecords()]);
 }
 
 async function refreshAnalytics() {
+  if (!isLoggedIn.value) return;
   analyticsLoading.value = true;
   try {
     if (analytics.dimension === 'year') {
@@ -1286,6 +1468,7 @@ function comparePeriod(dimension, period) {
 }
 
 async function refreshRecords() {
+  if (!isLoggedIn.value) return;
   recordsLoading.value = true;
   try {
     const list = await receiptApi.list({
@@ -1688,7 +1871,12 @@ onMounted(async () => {
     draftSavedAt.value = '已恢复';
   }
   await loadUsers();
-  await refreshAll();
+  if (isLoggedIn.value) {
+    setActiveUserId(currentUserId.value);
+    await refreshAll();
+  } else {
+    setActiveUserId('');
+  }
   window.addEventListener('resize', resizeCharts);
 });
 

@@ -5,15 +5,15 @@ const request = axios.create({
   timeout: 10000
 });
 
-let activeUserId = 'admin';
+let activeUserId = '';
 
 export function setActiveUserId(userId) {
-  activeUserId = userId || 'admin';
+  activeUserId = userId || '';
 }
 
 request.interceptors.request.use((config) => {
   config.headers = config.headers || {};
-  config.headers['X-User-Id'] = activeUserId;
+  if (activeUserId) config.headers['X-User-Id'] = activeUserId;
   return config;
 });
 
@@ -61,6 +61,9 @@ export const receiptApi = {
 export const userApi = {
   list() {
     return request.get('/users');
+  },
+  login(data) {
+    return request.post('/users/login', data);
   },
   create(data) {
     return request.post('/users', data);

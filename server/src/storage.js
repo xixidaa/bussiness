@@ -1,6 +1,7 @@
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { promises as fs } from 'fs';
+import { createHash } from 'crypto';
 import mongoose from 'mongoose';
 import { MongoMemoryServer } from 'mongodb-memory-server-core';
 import { seedReceipts } from './seed-data.js';
@@ -16,6 +17,8 @@ const __dirname = path.dirname(__filename);
 
 const DB_NAME = 'merchant_receipt_statistics';
 const EMBEDDED_DB_PATH = path.resolve(__dirname, '../.mongo-data');
+const DEFAULT_PASSWORD_SALT = 'merchant-ledger-default-admin';
+const DEFAULT_PASSWORD_HASH = createHash('sha256').update(`${DEFAULT_PASSWORD_SALT}:admin123`).digest('hex');
 
 const receiptSchema = new mongoose.Schema(
   {
@@ -46,6 +49,8 @@ const userSchema = new mongoose.Schema(
     id: { type: String, required: true, unique: true },
     name: { type: String, required: true },
     role: { type: String, required: true, default: 'user' },
+    passwordHash: { type: String, default: '' },
+    passwordSalt: { type: String, default: '' },
     createdAt: { type: String, required: true },
     updatedAt: { type: String, required: true }
   },
@@ -98,6 +103,8 @@ async function seedIfNeeded() {
       $set: {
         name: DEFAULT_USER.name,
         role: DEFAULT_USER.role,
+        passwordHash: DEFAULT_PASSWORD_HASH,
+        passwordSalt: DEFAULT_PASSWORD_SALT,
         updatedAt: now
       }
     },
@@ -144,6 +151,12 @@ export async function writeReceipts(receipts) {
 }
 
 export async function readUsers() {
+  await ensureDataFile();
+  const docs = await User.find().sort({ role: 1, createdAt: 1 }).lean();
+  return docs.map(({ _id, passwordHash, passwordSalt, ...rest }) => rest);
+}
+
+export async function readUsersWithSecrets() {
   await ensureDataFile();
   const docs = await User.find().sort({ role: 1, createdAt: 1 }).lean();
   return docs.map(({ _id, ...rest }) => rest);

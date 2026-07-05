@@ -2,23 +2,29 @@ import { seedReceipts } from '../../server/src/seed-data.js';
 
 const DEFAULT_USER = {
   id: 'admin',
-  name: '管理员',
+  name: '\u7ba1\u7406\u5458',
   role: 'admin'
 };
 
-const CHANNEL_KEYS = ['wechat', 'alipay', 'cash'];
+const DEFAULT_PASSWORD = 'admin123';
+const DEFAULT_PASSWORD_SALT = 'merchant-ledger-default-admin';
+const CHANNEL_KEYS = ['wechat', 'alipay', 'cash', 'other'];
 const CHANNELS = new Set(CHANNEL_KEYS);
 const ANALYTICS_GRANULARITIES = new Set(['year', 'month', 'day']);
 const ENTRY_GRANULARITIES = new Set(['month', 'day']);
+const ATTACHMENT_STATUSES = new Set(['none', 'uploaded', 'pending']);
 const PERIOD_PATTERNS = {
   year: /^\d{4}$/,
   month: /^\d{4}-(0[1-9]|1[0-2])$/,
   day: /^\d{4}-(0[1-9]|1[0-2])-(0[1-9]|[12]\d|3[01])$/
 };
 
-const SCHEMA_SQL = [
-  'CREATE TABLE IF NOT EXISTS users (id TEXT PRIMARY KEY, name TEXT NOT NULL, role TEXT NOT NULL, createdAt TEXT NOT NULL, updatedAt TEXT NOT NULL)',
-  'CREATE TABLE IF NOT EXISTS receipts (id TEXT PRIMARY KEY, userId TEXT NOT NULL DEFAULT "admin", channel TEXT NOT NULL, granularity TEXT NOT NULL, period TEXT NOT NULL, date TEXT NOT NULL, amount REAL NOT NULL, people INTEGER NOT NULL, createdAt TEXT NOT NULL, updatedAt TEXT NOT NULL, UNIQUE(userId, channel, granularity, period))',
+const TABLE_SQL = [
+  'CREATE TABLE IF NOT EXISTS users (id TEXT PRIMARY KEY, name TEXT NOT NULL, role TEXT NOT NULL, passwordHash TEXT NOT NULL DEFAULT "", passwordSalt TEXT NOT NULL DEFAULT "", createdAt TEXT NOT NULL, updatedAt TEXT NOT NULL)',
+  'CREATE TABLE IF NOT EXISTS receipts (id TEXT PRIMARY KEY, userId TEXT NOT NULL DEFAULT "admin", channel TEXT NOT NULL, granularity TEXT NOT NULL, period TEXT NOT NULL, date TEXT NOT NULL, amount REAL NOT NULL, people INTEGER NOT NULL, entryMode TEXT NOT NULL DEFAULT "manual", remark TEXT NOT NULL DEFAULT "", attachmentStatus TEXT NOT NULL DEFAULT "none", createdAt TEXT NOT NULL, updatedAt TEXT NOT NULL, UNIQUE(userId, channel, granularity, period))'
+];
+
+const INDEX_SQL = [
   'CREATE INDEX IF NOT EXISTS idx_receipts_user_granularity_period ON receipts (userId, granularity, period)',
   'CREATE INDEX IF NOT EXISTS idx_receipts_user_channel_period ON receipts (userId, channel, period)',
   'CREATE INDEX IF NOT EXISTS idx_receipts_granularity_period ON receipts (granularity, period)',
@@ -57,12 +63,23 @@ function normalizeChannel(value) {
 
 function normalizeUserId(value) {
   const text = String(value || '').trim();
-  return /^[a-zA-Z0-9_-]{2,32}$/.test(text) ? text : DEFAULT_USER.id;
+  return /^[a-zA-Z0-9_-]{2,32}$/.test(text) ? text : '';
 }
 
-function getCurrentUserId(request) {
-  const url = new URL(request.url);
-  return normalizeUserId(request.headers.get('x-user-id') || url.searchParams.get('userId') || DEFAULT_USER.id);
+function normalizeUserName(value) {
+  return String(value || '').trim().slice(0, 24);
+}
+
+function normalizePassword(value) {
+  return String(value || '');
+}
+
+function normalizeEntryMode(value) {
+  return value === 'import' ? 'import' : 'manual';
+}
+
+function normalizeAttachmentStatus(value) {
+  return ATTACHMENT_STATUSES.has(value) ? value : 'none';
 }
 
 function normalizeGranularity(value, allowed = ANALYTICS_GRANULARITIES) {
@@ -83,6 +100,25 @@ function normalizePeriod(granularity, value) {
   return trimmed;
 }
 
+async function sha256(text) {
+  const bytes = new TextEncoder().encode(text);
+  const digest = await crypto.subtle.digest('SHA-256', bytes);
+  return [...new Uint8Array(digest)].map((byte) => byte.toString(16).padStart(2, '0')).join('');
+}
+
+async function hashPassword(password, salt = crypto.randomUUID().replace(/-/g, '').slice(0, 24)) {
+  return {
+    passwordSalt: salt,
+    passwordHash: await sha256(`${salt}:${password}`)
+  };
+}
+
+function sanitizeUser(user) {
+  if (!user) return null;
+  const { passwordHash, passwordSalt, ...safeUser } = user;
+  return safeUser;
+}
+
 function buildDate(granularity, period) {
   if (granularity === 'month') return `${period}-01`;
   return period;
@@ -95,14 +131,11 @@ function getParentPeriod(granularity, period) {
 }
 
 function summarizeReceipts(receipts) {
-  const summary = {
-    wechat: { amount: 0, people: 0 },
-    alipay: { amount: 0, people: 0 },
-    cash: { amount: 0, people: 0 },
-    total: { amount: 0, people: 0 }
-  };
+  const summary = Object.fromEntries(CHANNEL_KEYS.map((key) => [key, { amount: 0, people: 0 }]));
+  summary.total = { amount: 0, people: 0 };
 
   for (const item of receipts) {
+    if (!summary[item.channel]) continue;
     summary[item.channel].amount += Number(item.amount);
     summary[item.channel].people += Number(item.people);
     summary.total.amount += Number(item.amount);
@@ -142,6 +175,9 @@ function buildEffectiveMonthRecords(receipts) {
       date: `${monthPeriod}-01`,
       amount: 0,
       people: 0,
+      entryMode: item.entryMode || 'manual',
+      remark: '',
+      attachmentStatus: 'none',
       createdAt: item.createdAt,
       updatedAt: item.updatedAt,
       derivedFrom: 'day',
@@ -191,6 +227,9 @@ function buildEffectiveYearRecords(receipts) {
       date: `${yearPeriod}-01-01`,
       amount: 0,
       people: 0,
+      entryMode: item.entryMode || 'manual',
+      remark: '',
+      attachmentStatus: 'none',
       createdAt: item.createdAt,
       updatedAt: item.updatedAt,
       derivedFrom: 'month'
@@ -259,10 +298,10 @@ function validateEntryPayload(body) {
   const people = Number(body.people);
 
   if (!granularity) errors.push('录入粒度必须为 month 或 day');
-  if (!channel) errors.push('渠道必须为 wechat、alipay 或 cash');
-  if (!period) errors.push('周期格式与粒度不匹配');
-  if (!Number.isFinite(amount) || amount <= 0) errors.push('收款金额必须为正数');
-  if (!Number.isInteger(people) || people <= 0) errors.push('收款人数必须为正整数');
+  if (!channel) errors.push('渠道必须为 wechat、alipay、cash 或 other');
+  if (!period) errors.push('日期格式与粒度不匹配');
+  if (!Number.isFinite(amount) || amount <= 0) errors.push('收款金额必须大于 0');
+  if (!Number.isInteger(people) || people < 0) errors.push('收款人数不可为负');
 
   return {
     errors,
@@ -272,7 +311,10 @@ function validateEntryPayload(body) {
       period,
       date: granularity && period ? buildDate(granularity, period) : null,
       amount: Math.round(amount * 100) / 100,
-      people
+      people,
+      entryMode: normalizeEntryMode(body.entryMode),
+      remark: String(body.remark || '').trim().slice(0, 200),
+      attachmentStatus: normalizeAttachmentStatus(body.attachmentStatus)
     }
   };
 }
@@ -289,33 +331,39 @@ function hasDayDataForMonth(receipts, channel, monthPeriod, ignoreId = '') {
 
 function validateImportPayload(body) {
   const errors = [];
-  const channel = normalizeChannel(body.channel);
   const rows = Array.isArray(body.rows) ? body.rows : [];
 
-  if (!channel) errors.push('导入渠道必须为 wechat、alipay 或 cash');
   if (rows.length === 0) errors.push('导入数据不能为空');
   if (rows.length > 500) errors.push('单次最多导入 500 行');
 
-  const seenPeriods = new Set();
+  const seenKeys = new Set();
   const values = rows.map((row, index) => {
     const rowNumber = index + 2;
-    const period = normalizePeriod('month', String(row.period || row.month || '').trim());
+    const granularity = normalizeGranularity(row.granularity || 'month', ENTRY_GRANULARITIES);
+    const channel = normalizeChannel(row.channel || body.channel);
+    const period = normalizePeriod(granularity, String(row.period || row.month || '').trim());
     const amount = Number(row.amount);
     const people = Number(row.people);
+    const duplicateKey = `${granularity || ''}__${channel || ''}__${period || ''}`;
 
-    if (!period) errors.push(`第 ${rowNumber} 行月份格式应为 YYYY-MM`);
+    if (!granularity) errors.push(`第 ${rowNumber} 行粒度必须为 month 或 day`);
+    if (!channel) errors.push(`第 ${rowNumber} 行渠道必须为 wechat、alipay、cash 或 other`);
+    if (!period) errors.push(`第 ${rowNumber} 行日期格式与粒度不匹配`);
     if (!Number.isFinite(amount) || amount <= 0) errors.push(`第 ${rowNumber} 行金额必须大于 0`);
-    if (!Number.isInteger(people) || people <= 0) errors.push(`第 ${rowNumber} 行人数必须为正整数`);
-    if (period && seenPeriods.has(period)) errors.push(`第 ${rowNumber} 行月份 ${period} 重复`);
-    if (period) seenPeriods.add(period);
+    if (!Number.isInteger(people) || people < 0) errors.push(`第 ${rowNumber} 行人数不可为负`);
+    if (period && channel && granularity && seenKeys.has(duplicateKey)) errors.push(`第 ${rowNumber} 行记录重复`);
+    if (period && channel && granularity) seenKeys.add(duplicateKey);
 
     return {
       channel,
-      granularity: 'month',
+      granularity,
       period,
-      date: period ? buildDate('month', period) : null,
+      date: granularity && period ? buildDate(granularity, period) : null,
       amount: Math.round(amount * 100) / 100,
-      people
+      people,
+      entryMode: 'import',
+      remark: String(row.remark || '').trim().slice(0, 200),
+      attachmentStatus: normalizeAttachmentStatus(row.attachmentStatus)
     };
   });
 
@@ -323,9 +371,14 @@ function validateImportPayload(body) {
 }
 
 async function ensureSchema(db) {
+  for (const statement of TABLE_SQL) {
+    await db.prepare(statement).run();
+  }
+
+  await migrateUsersTable(db);
   await migrateReceiptsTable(db);
 
-  for (const statement of SCHEMA_SQL) {
+  for (const statement of INDEX_SQL) {
     await db.prepare(statement).run();
   }
 
@@ -356,26 +409,53 @@ async function hasUserScopedUniqueIndex(db) {
   return indexes.some((columns) => columns.join(',') === 'userId,channel,granularity,period');
 }
 
+async function migrateUsersTable(db) {
+  const columns = await tableColumns(db, 'users');
+  if (columns.length === 0) return;
+
+  if (!columns.includes('passwordHash')) {
+    await db.prepare('ALTER TABLE users ADD COLUMN passwordHash TEXT NOT NULL DEFAULT ""').run();
+  }
+  if (!columns.includes('passwordSalt')) {
+    await db.prepare('ALTER TABLE users ADD COLUMN passwordSalt TEXT NOT NULL DEFAULT ""').run();
+  }
+}
+
 async function migrateReceiptsTable(db) {
   const columns = await tableColumns(db, 'receipts');
   if (columns.length === 0) return;
 
   const needsUserColumn = !columns.includes('userId');
+  const needsEntryModeColumn = !columns.includes('entryMode');
+  const needsRemarkColumn = !columns.includes('remark');
+  const needsAttachmentColumn = !columns.includes('attachmentStatus');
   const needsScopedUniqueIndex = !(await hasUserScopedUniqueIndex(db));
-  if (!needsUserColumn && !needsScopedUniqueIndex) return;
+  if (
+    !needsUserColumn &&
+    !needsEntryModeColumn &&
+    !needsRemarkColumn &&
+    !needsAttachmentColumn &&
+    !needsScopedUniqueIndex
+  ) {
+    return;
+  }
 
   await db.prepare('DROP TABLE IF EXISTS receipts_migrating').run();
-  await db.prepare(
-    'CREATE TABLE receipts_migrating (id TEXT PRIMARY KEY, userId TEXT NOT NULL DEFAULT "admin", channel TEXT NOT NULL, granularity TEXT NOT NULL, period TEXT NOT NULL, date TEXT NOT NULL, amount REAL NOT NULL, people INTEGER NOT NULL, createdAt TEXT NOT NULL, updatedAt TEXT NOT NULL, UNIQUE(userId, channel, granularity, period))'
-  ).run();
+  await db.prepare(TABLE_SQL[1].replace('CREATE TABLE IF NOT EXISTS receipts', 'CREATE TABLE receipts_migrating')).run();
 
   const userIdExpression = needsUserColumn ? `'${DEFAULT_USER.id}'` : `COALESCE(NULLIF(userId, ''), '${DEFAULT_USER.id}')`;
-  await db.prepare(
-    `INSERT OR IGNORE INTO receipts_migrating
-      (id, userId, channel, granularity, period, date, amount, people, createdAt, updatedAt)
-     SELECT id, ${userIdExpression}, channel, granularity, period, date, amount, people, createdAt, updatedAt
-     FROM receipts`
-  ).run();
+  const entryModeExpression = needsEntryModeColumn ? "'manual'" : "COALESCE(NULLIF(entryMode, ''), 'manual')";
+  const remarkExpression = needsRemarkColumn ? "''" : "COALESCE(remark, '')";
+  const attachmentExpression = needsAttachmentColumn ? "'none'" : "COALESCE(NULLIF(attachmentStatus, ''), 'none')";
+
+  await db
+    .prepare(
+      `INSERT OR IGNORE INTO receipts_migrating
+        (id, userId, channel, granularity, period, date, amount, people, entryMode, remark, attachmentStatus, createdAt, updatedAt)
+       SELECT id, ${userIdExpression}, channel, granularity, period, date, amount, people, ${entryModeExpression}, ${remarkExpression}, ${attachmentExpression}, createdAt, updatedAt
+       FROM receipts`
+    )
+    .run();
 
   await db.prepare('DROP TABLE receipts').run();
   await db.prepare('ALTER TABLE receipts_migrating RENAME TO receipts').run();
@@ -383,13 +463,19 @@ async function migrateReceiptsTable(db) {
 
 async function ensureDefaultUser(db) {
   const now = new Date().toISOString();
+  const password = await hashPassword(DEFAULT_PASSWORD, DEFAULT_PASSWORD_SALT);
   await db
     .prepare(
-      `INSERT INTO users (id, name, role, createdAt, updatedAt)
-       VALUES (?, ?, ?, ?, ?)
-       ON CONFLICT(id) DO UPDATE SET name = excluded.name, role = excluded.role, updatedAt = excluded.updatedAt`
+      `INSERT INTO users (id, name, role, passwordHash, passwordSalt, createdAt, updatedAt)
+       VALUES (?, ?, ?, ?, ?, ?, ?)
+       ON CONFLICT(id) DO UPDATE SET
+         name = excluded.name,
+         role = excluded.role,
+         passwordHash = excluded.passwordHash,
+         passwordSalt = excluded.passwordSalt,
+         updatedAt = excluded.updatedAt`
     )
-    .bind(DEFAULT_USER.id, DEFAULT_USER.name, DEFAULT_USER.role, now, now)
+    .bind(DEFAULT_USER.id, DEFAULT_USER.name, DEFAULT_USER.role, password.passwordHash, password.passwordSalt, now, now)
     .run();
 }
 
@@ -402,8 +488,8 @@ async function seedIfNeeded(db) {
     db
       .prepare(
         `INSERT OR IGNORE INTO receipts
-          (id, userId, channel, granularity, period, date, amount, people, createdAt, updatedAt)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+          (id, userId, channel, granularity, period, date, amount, people, entryMode, remark, attachmentStatus, createdAt, updatedAt)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
       )
       .bind(
         item.id,
@@ -414,6 +500,9 @@ async function seedIfNeeded(db) {
         item.date,
         item.amount,
         item.people,
+        normalizeEntryMode(item.entryMode),
+        item.remark || '',
+        normalizeAttachmentStatus(item.attachmentStatus),
         item.createdAt,
         item.updatedAt
       )
@@ -436,11 +525,15 @@ export async function ensureDatabase(db) {
 }
 
 async function readReceipts(db) {
-  const { results } = await db
-    .prepare('SELECT * FROM receipts ORDER BY period DESC, updatedAt DESC')
-    .run();
+  const { results } = await db.prepare('SELECT * FROM receipts ORDER BY period DESC, updatedAt DESC').run();
   return Array.isArray(results)
-    ? results.map((item) => ({ ...item, userId: normalizeUserId(item.userId) }))
+    ? results.map((item) => ({
+        ...item,
+        userId: normalizeUserId(item.userId) || DEFAULT_USER.id,
+        entryMode: normalizeEntryMode(item.entryMode),
+        remark: item.remark || '',
+        attachmentStatus: normalizeAttachmentStatus(item.attachmentStatus)
+      }))
     : [];
 }
 
@@ -452,8 +545,8 @@ async function writeReceipts(db, receipts) {
     db
       .prepare(
         `INSERT INTO receipts
-          (id, userId, channel, granularity, period, date, amount, people, createdAt, updatedAt)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+          (id, userId, channel, granularity, period, date, amount, people, entryMode, remark, attachmentStatus, createdAt, updatedAt)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
       )
       .bind(
         item.id,
@@ -464,6 +557,9 @@ async function writeReceipts(db, receipts) {
         item.date,
         item.amount,
         item.people,
+        normalizeEntryMode(item.entryMode),
+        item.remark || '',
+        normalizeAttachmentStatus(item.attachmentStatus),
         item.createdAt,
         item.updatedAt
       )
@@ -483,13 +579,20 @@ function mergeUserReceipts(allReceipts, userId, nextReceipts) {
   ];
 }
 
-async function readUsers(db) {
+async function readUsers(db, includeSecrets = false) {
   const { results } = await db.prepare('SELECT * FROM users ORDER BY role ASC, createdAt ASC').run();
-  return Array.isArray(results) ? results : [];
+  const users = Array.isArray(results) ? results : [];
+  return includeSecrets ? users : users.map(sanitizeUser);
 }
 
-function normalizeUserName(value) {
-  return String(value || '').trim().slice(0, 24);
+async function requireCurrentUser(db, request) {
+  const url = new URL(request.url);
+  const userId = normalizeUserId(request.headers.get('x-user-id') || url.searchParams.get('userId'));
+  if (!userId) return { response: fail(401, '请先登录') };
+
+  const users = await readUsers(db);
+  if (!users.some((item) => item.id === userId)) return { response: fail(401, '登录用户不存在') };
+  return { userId };
 }
 
 function attachDerivedMonthFlags(receipts) {
@@ -505,18 +608,17 @@ function attachDerivedMonthFlags(receipts) {
     dayMonthSummaryMap.set(key, current);
   }
 
-  return receipts.map((item) => ({
-    ...item,
-    isOverridden: item.granularity === 'month' && dayMonthSummaryMap.has(monthKey(item.channel, item.period)),
-    effectiveAmount:
-      item.granularity === 'month' && dayMonthSummaryMap.has(monthKey(item.channel, item.period))
-        ? Math.round(dayMonthSummaryMap.get(monthKey(item.channel, item.period)).amount * 100) / 100
-        : null,
-    effectivePeople:
-      item.granularity === 'month' && dayMonthSummaryMap.has(monthKey(item.channel, item.period))
-        ? dayMonthSummaryMap.get(monthKey(item.channel, item.period)).people
-        : null
-  }));
+  return receipts.map((item) => {
+    const key = monthKey(item.channel, item.period);
+    const isOverridden = item.granularity === 'month' && dayMonthSummaryMap.has(key);
+    const derivedMonth = dayMonthSummaryMap.get(key);
+    return {
+      ...item,
+      isOverridden,
+      effectiveAmount: isOverridden ? Math.round(derivedMonth.amount * 100) / 100 : null,
+      effectivePeople: isOverridden ? derivedMonth.people : null
+    };
+  });
 }
 
 export async function handleHealth() {
@@ -527,22 +629,47 @@ export async function handleUsersList(db) {
   return json(await readUsers(db));
 }
 
+export async function handleUsersLogin(db, request) {
+  const body = await request.json().catch(() => null);
+  const account = String(body?.account || body?.userId || '').trim();
+  const password = normalizePassword(body?.password);
+  if (!account || !password) return fail(400, '请输入账号和密码');
+
+  const users = await readUsers(db, true);
+  const user =
+    users.find((item) => item.id === account || item.name === account) ||
+    (['admin', '\u7ba1\u7406\u5458'].includes(account) ? users.find((item) => item.id === DEFAULT_USER.id) : null);
+  if (!user) return fail(401, '账号或密码不正确');
+
+  const expected = await hashPassword(password, user.passwordSalt || '');
+  const defaultAdminLogin = user.id === DEFAULT_USER.id && password === DEFAULT_PASSWORD;
+  if ((!user.passwordHash || expected.passwordHash !== user.passwordHash) && !defaultAdminLogin) {
+    return fail(401, '账号或密码不正确');
+  }
+
+  return json(sanitizeUser(user), '登录成功');
+}
+
 export async function handleUsersCreate(db, request) {
   const body = await request.json().catch(() => null);
   const name = normalizeUserName(body?.name);
-  const id = body?.id && /^[a-zA-Z0-9_-]{2,32}$/.test(String(body.id).trim())
-    ? String(body.id).trim()
-    : `user-${crypto.randomUUID().replace(/-/g, '').slice(0, 8)}`;
+  const id = normalizeUserId(body?.id) || `user-${crypto.randomUUID().replace(/-/g, '').slice(0, 8)}`;
+  const password = normalizePassword(body?.password);
 
   if (!name) return fail(400, '用户名称不能为空');
+  if (password.length < 6) return fail(400, '密码至少 6 位');
+
+  const users = await readUsers(db);
+  if (users.some((item) => item.id === id || item.name === name)) return fail(409, '用户已存在');
 
   const now = new Date().toISOString();
+  const passwordFields = await hashPassword(password);
   const result = await db
     .prepare(
-      `INSERT OR IGNORE INTO users (id, name, role, createdAt, updatedAt)
-       VALUES (?, ?, ?, ?, ?)`
+      `INSERT OR IGNORE INTO users (id, name, role, passwordHash, passwordSalt, createdAt, updatedAt)
+       VALUES (?, ?, ?, ?, ?, ?, ?)`
     )
-    .bind(id, name, 'user', now, now)
+    .bind(id, name, 'user', passwordFields.passwordHash, passwordFields.passwordSalt, now, now)
     .run();
 
   if (result.meta?.changes === 0) return fail(409, '用户已存在');
@@ -551,8 +678,10 @@ export async function handleUsersCreate(db, request) {
 }
 
 export async function handleList(db, request) {
+  const auth = await requireCurrentUser(db, request);
+  if (auth.response) return auth.response;
   const url = new URL(request.url);
-  const userId = getCurrentUserId(request);
+  const userId = auth.userId;
   const granularity = url.searchParams.get('granularity')
     ? normalizeGranularity(url.searchParams.get('granularity'), ENTRY_GRANULARITIES)
     : null;
@@ -561,9 +690,9 @@ export async function handleList(db, request) {
   const parentPeriod = url.searchParams.get('parentPeriod') || '';
 
   if (url.searchParams.has('granularity') && !granularity) return fail(400, '录入台账仅支持 month 或 day');
-  if (url.searchParams.has('channel') && !channel) return fail(400, '渠道必须为 wechat、alipay 或 cash');
-  if (url.searchParams.has('period') && !period) return fail(400, '周期格式与粒度不匹配');
-  if (granularity && !validateParentPeriod(granularity, parentPeriod)) return fail(400, '父级周期格式不正确');
+  if (url.searchParams.has('channel') && !channel) return fail(400, '渠道必须为 wechat、alipay、cash 或 other');
+  if (url.searchParams.has('period') && !period) return fail(400, '日期格式与粒度不匹配');
+  if (granularity && !validateParentPeriod(granularity, parentPeriod)) return fail(400, '父级日期格式不正确');
 
   const receipts = userReceipts(await readReceipts(db), userId);
   const result = attachDerivedMonthFlags(receipts)
@@ -577,15 +706,17 @@ export async function handleList(db, request) {
 }
 
 export async function handleSingle(db, request) {
+  const auth = await requireCurrentUser(db, request);
+  if (auth.response) return auth.response;
   const url = new URL(request.url);
-  const userId = getCurrentUserId(request);
+  const userId = auth.userId;
   const granularity = normalizeGranularity(url.searchParams.get('granularity'), ENTRY_GRANULARITIES);
   const channel = normalizeChannel(url.searchParams.get('channel'));
   const period = normalizePeriod(granularity, url.searchParams.get('period'));
 
   if (!granularity) return fail(400, '录入台账仅支持 month 或 day');
-  if (!channel) return fail(400, '渠道必须为 wechat、alipay 或 cash');
-  if (!period) return fail(400, '周期格式与粒度不匹配');
+  if (!channel) return fail(400, '渠道必须为 wechat、alipay、cash 或 other');
+  if (!period) return fail(400, '日期格式与粒度不匹配');
 
   const receipts = userReceipts(await readReceipts(db), userId);
   const result = receipts
@@ -598,13 +729,15 @@ export async function handleSingle(db, request) {
 }
 
 export async function handleSummary(db, request) {
+  const auth = await requireCurrentUser(db, request);
+  if (auth.response) return auth.response;
   const url = new URL(request.url);
-  const userId = getCurrentUserId(request);
+  const userId = auth.userId;
   const dimension = normalizeGranularity(url.searchParams.get('dimension') || 'month');
   const period = url.searchParams.get('period') ? normalizePeriod(dimension, url.searchParams.get('period')) : null;
 
   if (!dimension) return fail(400, '统计粒度必须为 year、month 或 day');
-  if (url.searchParams.has('period') && !period) return fail(400, '周期格式与粒度不匹配');
+  if (url.searchParams.has('period') && !period) return fail(400, '日期格式与粒度不匹配');
 
   const receipts = userReceipts(await readReceipts(db), userId);
   const records = getRecordsForDimension(receipts, dimension);
@@ -618,13 +751,15 @@ export async function handleSummary(db, request) {
 }
 
 export async function handleTrend(db, request) {
+  const auth = await requireCurrentUser(db, request);
+  if (auth.response) return auth.response;
   const url = new URL(request.url);
-  const userId = getCurrentUserId(request);
+  const userId = auth.userId;
   const dimension = normalizeGranularity(url.searchParams.get('dimension') || 'month');
   const parentPeriod = url.searchParams.get('parentPeriod') || '';
 
   if (!dimension) return fail(400, '统计粒度必须为 year、month 或 day');
-  if (!validateParentPeriod(dimension, parentPeriod)) return fail(400, '父级周期格式不正确');
+  if (!validateParentPeriod(dimension, parentPeriod)) return fail(400, '父级日期格式不正确');
 
   const receipts = userReceipts(await readReceipts(db), userId);
   const records = getRecordsForDimension(receipts, dimension).filter((item) =>
@@ -635,7 +770,9 @@ export async function handleTrend(db, request) {
 }
 
 export async function handleCreate(db, request) {
-  const userId = getCurrentUserId(request);
+  const auth = await requireCurrentUser(db, request);
+  if (auth.response) return auth.response;
+  const userId = auth.userId;
   const body = await request.json().catch(() => null);
   const { errors, value } = validateEntryPayload(body || {});
   if (errors.length) return fail(400, errors.join('；'));
@@ -669,14 +806,16 @@ export async function handleCreate(db, request) {
 }
 
 export async function handleImport(db, request) {
-  const userId = getCurrentUserId(request);
+  const auth = await requireCurrentUser(db, request);
+  if (auth.response) return auth.response;
+  const userId = auth.userId;
   const body = await request.json().catch(() => null);
   const { errors, values } = validateImportPayload(body || {});
   if (errors.length) return fail(400, errors.join('；'));
 
   const allReceipts = await readReceipts(db);
   const receipts = userReceipts(allReceipts, userId);
-  const blocked = values.filter((item) => hasDayDataForMonth(receipts, item.channel, item.period));
+  const blocked = values.filter((item) => item.granularity === 'month' && hasDayDataForMonth(receipts, item.channel, item.period));
   if (blocked.length) {
     return fail(409, `以下月份已有日数据，不能导入月数据：${blocked.map((item) => item.period).join('、')}`);
   }
@@ -717,7 +856,9 @@ export async function handleImport(db, request) {
 }
 
 export async function handleUpdate(db, request, id) {
-  const userId = getCurrentUserId(request);
+  const auth = await requireCurrentUser(db, request);
+  if (auth.response) return auth.response;
+  const userId = auth.userId;
   const body = await request.json().catch(() => null);
   const { errors, value } = validateEntryPayload(body || {});
   if (errors.length) return fail(400, errors.join('；'));
@@ -751,7 +892,9 @@ export async function handleUpdate(db, request, id) {
 }
 
 export async function handleDelete(db, request, id) {
-  const userId = getCurrentUserId(request);
+  const auth = await requireCurrentUser(db, request);
+  if (auth.response) return auth.response;
+  const userId = auth.userId;
   const allReceipts = await readReceipts(db);
   const receipts = userReceipts(allReceipts, userId);
   const nextReceipts = receipts.filter((item) => item.id !== id);

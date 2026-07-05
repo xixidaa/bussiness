@@ -1,6 +1,6 @@
 import express from 'express';
 import { nanoid } from 'nanoid';
-import { DEFAULT_USER, readReceipts, writeReceipts } from '../storage.js';
+import { readReceipts, readUsers, writeReceipts } from '../storage.js';
 
 const router = express.Router();
 
@@ -18,12 +18,27 @@ const fail = (res, status, message) => res.status(status).json({ code: status, m
 
 function normalizeUserId(value) {
   const text = String(value || '').trim();
-  return /^[a-zA-Z0-9_-]{2,32}$/.test(text) ? text : DEFAULT_USER.id;
+  return /^[a-zA-Z0-9_-]{2,32}$/.test(text) ? text : '';
 }
 
 function getCurrentUserId(req) {
-  return normalizeUserId(req.get('x-user-id') || req.query.userId || DEFAULT_USER.id);
+  return req.authUserId;
 }
+
+router.use(async (req, res, next) => {
+  try {
+    const userId = normalizeUserId(req.get('x-user-id') || req.query.userId);
+    if (!userId) return fail(res, 401, '请先登录');
+
+    const users = await readUsers();
+    if (!users.some((item) => item.id === userId)) return fail(res, 401, '登录用户不存在');
+
+    req.authUserId = userId;
+    next();
+  } catch (error) {
+    next(error);
+  }
+});
 
 function normalizeChannel(value) {
   return CHANNELS.has(value) ? value : null;

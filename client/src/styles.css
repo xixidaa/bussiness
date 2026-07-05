@@ -44,6 +44,159 @@ input {
   font: inherit;
 }
 
+.login-shell {
+  min-height: 100vh;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(460px, 700px);
+  align-items: stretch;
+  gap: 0;
+  padding: 0 clamp(36px, 5vw, 96px) 0 0;
+  background:
+    linear-gradient(135deg, rgba(16, 36, 58, 0.96), rgba(15, 118, 110, 0.86)),
+    #10243a;
+}
+
+.login-backdrop {
+  min-width: 0;
+  display: grid;
+  align-content: center;
+  gap: 28px;
+  padding: clamp(32px, 7vw, 86px);
+  color: #f8fafc;
+}
+
+.login-hero-brand strong,
+.login-hero-brand small {
+  color: #f8fafc;
+}
+
+.login-hero-brand small {
+  opacity: 0.72;
+}
+
+.login-hero-copy {
+  max-width: 620px;
+}
+
+.login-hero-copy h1 {
+  margin: 0;
+  font-size: clamp(34px, 5vw, 60px);
+  line-height: 1.08;
+  letter-spacing: 0;
+}
+
+.login-hero-copy p {
+  max-width: 540px;
+  margin: 18px 0 0;
+  color: rgba(248, 250, 252, 0.76);
+  font-size: 16px;
+  line-height: 1.8;
+}
+
+.login-preview {
+  width: min(100%, 520px);
+  display: grid;
+  gap: 18px;
+  padding: 22px;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.1);
+  box-shadow: 0 24px 60px rgba(4, 12, 24, 0.24);
+}
+
+.preview-bar {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.preview-bar span {
+  color: rgba(248, 250, 252, 0.72);
+}
+
+.preview-bar strong {
+  font-size: 30px;
+  line-height: 1;
+}
+
+.preview-lines {
+  display: grid;
+  gap: 10px;
+}
+
+.preview-lines i {
+  display: block;
+  height: 8px;
+  border-radius: 999px;
+  background: linear-gradient(90deg, #f8c27a, #38bdf8);
+}
+
+.preview-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.preview-grid span {
+  min-width: 0;
+  padding: 10px;
+  border-radius: 8px;
+  color: rgba(248, 250, 252, 0.86);
+  background: rgba(255, 255, 255, 0.1);
+  text-align: center;
+  font-size: 13px;
+}
+
+.login-card {
+  width: min(100%, 520px);
+  align-self: center;
+  justify-self: center;
+  display: grid;
+  gap: 20px;
+  margin: 32px 0 32px 32px;
+  padding: 34px;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  border-radius: 12px;
+  background: rgba(255, 253, 248, 0.96);
+  box-shadow: 0 28px 70px rgba(4, 12, 24, 0.34);
+}
+
+.login-copy {
+  padding: 0;
+}
+
+.login-copy h1 {
+  margin: 0;
+  color: var(--ink);
+  font-size: 34px;
+  line-height: 1.08;
+  letter-spacing: 0;
+}
+
+.login-copy p {
+  margin: 10px 0 0;
+  color: var(--muted);
+  line-height: 1.65;
+}
+
+.login-card .el-form-item__label {
+  color: var(--muted);
+}
+
+.login-button {
+  width: 100%;
+  min-height: 46px;
+}
+
+.login-tip {
+  margin: -6px 0 0;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.5;
+  text-align: center;
+}
+
 .app-shell {
   min-height: 100vh;
   display: grid;
@@ -153,6 +306,19 @@ input {
 .current-user .el-select__placeholder span,
 .current-user .el-input__inner {
   color: var(--ink) !important;
+}
+
+.logout-button {
+  width: 100%;
+  color: rgba(248, 250, 252, 0.9);
+  border-color: rgba(255, 255, 255, 0.2);
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.logout-button:hover {
+  color: #fff;
+  border-color: rgba(255, 255, 255, 0.34);
+  background: rgba(255, 255, 255, 0.14);
 }
 
 .main-shell {
@@ -594,6 +760,24 @@ input {
 }
 
 @media (max-width: 1180px) {
+  .login-shell {
+    grid-template-columns: 1fr;
+    padding: 0;
+  }
+
+  .login-backdrop {
+    padding: 32px 24px 12px;
+  }
+
+  .login-preview {
+    display: none;
+  }
+
+  .login-card {
+    width: min(100% - 32px, 520px);
+    margin: 18px auto 32px;
+  }
+
   .app-shell {
     grid-template-columns: 1fr;
   }
@@ -653,6 +837,30 @@ input {
 }
 
 @media (max-width: 760px) {
+  .login-backdrop {
+    gap: 16px;
+    padding: 24px 16px 8px;
+  }
+
+  .login-hero-copy h1 {
+    font-size: 30px;
+  }
+
+  .login-hero-copy p {
+    margin-top: 10px;
+    font-size: 14px;
+  }
+
+  .login-card {
+    width: calc(100% - 24px);
+    gap: 16px;
+    padding: 22px;
+  }
+
+  .login-copy h1 {
+    font-size: 28px;
+  }
+
   .main-shell {
     padding: 12px 12px 88px;
   }
