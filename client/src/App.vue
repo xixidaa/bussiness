@@ -383,7 +383,11 @@
                 <template #default="{ row }">{{ granularityText(row.granularity) }}</template>
               </el-table-column>
               <el-table-column prop="channel" label="渠道" width="98">
-                <template #default="{ row }"><el-tag>{{ channelText(row.channel) }}</el-tag></template>
+                <template #default="{ row }">
+                  <el-tag class="channel-tag" :class="channelTagClass(row.channel)">
+                    {{ channelText(row.channel) }}
+                  </el-tag>
+                </template>
               </el-table-column>
               <el-table-column label="收款金额" min-width="130" align="right">
                 <template #default="{ row }">{{ money(getEffectiveAmount(row)) }}</template>
@@ -416,7 +420,9 @@
                 <div>
                   <div class="record-top">
                     <strong>{{ money(getEffectiveAmount(item)) }}</strong>
-                    <el-tag>{{ channelText(item.channel) }}</el-tag>
+                    <el-tag class="channel-tag" :class="channelTagClass(item.channel)">
+                      {{ channelText(item.channel) }}
+                    </el-tag>
                   </div>
                   <span>{{ formatPeriodLabel(item.granularity, item.period) }} · {{ granularityText(item.granularity) }} · {{ entryModeText(item.entryMode) }}</span>
                   <p v-if="item.remark">{{ item.remark }}</p>
@@ -795,6 +801,12 @@ const channelOptions = [
   { value: 'cash', label: '现金' },
   { value: 'other', label: '其他' }
 ];
+const channelTagClasses = {
+  wechat: 'is-wechat',
+  alipay: 'is-alipay',
+  cash: 'is-cash',
+  other: 'is-other'
+};
 
 const navItems = [
   { value: 'dashboard', label: '经营看板', shortLabel: '看板', kicker: 'Dashboard', title: '首页 / 经营看板', desc: '10 秒内看懂今日、本月、本年的收款表现。', icon: DataAnalysis },
@@ -1134,6 +1146,10 @@ function buildDeltaNote(current, previous) {
 
 function channelText(value) {
   return channelOptions.find((item) => item.value === value)?.label || '未识别';
+}
+
+function channelTagClass(value) {
+  return channelTagClasses[value] || channelTagClasses.other;
 }
 
 function granularityText(value) {

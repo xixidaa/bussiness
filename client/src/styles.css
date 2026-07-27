@@ -752,6 +752,34 @@ input {
   margin: 8px 0 0;
 }
 
+.channel-tag {
+  font-weight: 700;
+}
+
+.channel-tag.is-wechat {
+  --el-tag-text-color: #087c45;
+  --el-tag-bg-color: #e7f8ee;
+  --el-tag-border-color: #9bd8b4;
+}
+
+.channel-tag.is-alipay {
+  --el-tag-text-color: #155db7;
+  --el-tag-bg-color: #e9f2ff;
+  --el-tag-border-color: #a9c8f2;
+}
+
+.channel-tag.is-cash {
+  --el-tag-text-color: #9a5700;
+  --el-tag-bg-color: #fff1cf;
+  --el-tag-border-color: #edc977;
+}
+
+.channel-tag.is-other {
+  --el-tag-text-color: #5e6672;
+  --el-tag-bg-color: #f0f2f5;
+  --el-tag-border-color: #c9ced6;
+}
+
 .pagination-wrap {
   display: flex;
   justify-content: flex-end;
