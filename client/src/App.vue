@@ -107,18 +107,38 @@
 
       <div class="current-user">
         <span>当前用户</span>
-        <el-select v-model="currentUserId" class="full-control" size="large" @change="handleUserChange">
-          <el-option
-            v-for="item in users"
-            :key="item.id"
-            :label="userDisplayName(item)"
-            :value="item.id"
-            :disabled="userProfile(item.id).status === 'disabled'"
-          />
-        </el-select>
-        <el-button class="logout-button" @click="logout">
+        <el-dropdown trigger="click" placement="bottom-end" @command="handleUserChange">
+          <button
+            type="button"
+            class="current-user-avatar"
+            :aria-label="currentUserLabel"
+            :title="currentUserLabel"
+          >
+            {{ currentUserInitial }}
+          </button>
+          <template #dropdown>
+            <el-dropdown-menu>
+              <el-dropdown-item
+                v-for="item in users"
+                :key="item.id"
+                class="user-dropdown-option"
+                :class="{ 'is-current': item.id === currentUserId }"
+                :command="item.id"
+                :disabled="userProfile(item.id).status === 'disabled'"
+              >
+                <span class="user-menu-avatar">{{ userInitial(item) }}</span>
+                <span class="user-menu-name">{{ item.name }}</span>
+                <span class="user-role-tag" :class="`is-${userProfile(item.id).role}`">
+                  {{ roleText(userProfile(item.id).role) }}
+                </span>
+                <span v-if="userProfile(item.id).status === 'disabled'" class="user-status-tag">禁用</span>
+              </el-dropdown-item>
+            </el-dropdown-menu>
+          </template>
+        </el-dropdown>
+        <el-button class="logout-button" aria-label="注销" title="注销" @click="logout">
           <el-icon><SwitchButton /></el-icon>
-          注销
+          <span class="logout-label">注销</span>
         </el-button>
       </div>
     </aside>
@@ -902,6 +922,9 @@ const logFilters = reactive({
 });
 
 const activeMeta = computed(() => navItems.find((item) => item.value === activeView.value) || navItems[0]);
+const currentUser = computed(() => users.value.find((item) => item.id === currentUserId.value));
+const currentUserLabel = computed(() => (currentUser.value ? `当前用户：${userDisplayName(currentUser.value)}` : '当前用户'));
+const currentUserInitial = computed(() => userInitial(currentUser.value));
 const enabledChannelOptions = computed(() => channelOptions.filter((item) => settings.channels[item.value]));
 const dashboardChannelOptions = computed(() => (
   analytics.channel === 'all'
@@ -1169,6 +1192,10 @@ function userDisplayName(user) {
   return `${user.name} · ${roleText(profile.role)}${profile.status === 'disabled' ? '（禁用）' : ''}`;
 }
 
+function userInitial(user) {
+  return Array.from(String(user?.name || '用户').trim())[0] || '用';
+}
+
 function roleText(role) {
   if (role === 'admin') return '管理员';
   if (role === 'manager') return '老板/店长';
@@ -1201,7 +1228,10 @@ function saveSettings() {
 function switchView(view) {
   activeView.value = view;
   window.location.hash = view;
-  if (view === 'dashboard') nextTick(() => requestAnimationFrame(renderCharts));
+  nextTick(() => {
+    window.scrollTo({ top: 0, left: 0, behavior: 'auto' });
+    if (view === 'dashboard') requestAnimationFrame(renderCharts);
+  });
 }
 
 function openCreate() {

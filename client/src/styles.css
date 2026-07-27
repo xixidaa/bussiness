@@ -290,26 +290,127 @@ input {
 
 .current-user {
   display: grid;
+  grid-template-columns: 42px minmax(0, 1fr);
+  align-items: center;
   gap: 8px;
   padding-top: 16px;
   border-top: 1px solid rgba(255, 255, 255, 0.14);
 }
 
 .current-user > span {
+  grid-column: 1 / -1;
   color: rgba(248, 250, 252, 0.66);
   font-size: 12px;
 }
 
-.current-user .el-select__selected-item,
-.current-user .el-select__selected-item span,
-.current-user .el-select__placeholder,
-.current-user .el-select__placeholder span,
-.current-user .el-input__inner {
-  color: var(--ink) !important;
+.current-user .el-dropdown {
+  width: 42px;
+  height: 42px;
+}
+
+.current-user-avatar {
+  width: 42px;
+  height: 42px;
+  border: 1px solid rgba(255, 255, 255, 0.32);
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  padding: 0;
+  color: #10243a;
+  background: #f8c27a;
+  font-size: 16px;
+  font-weight: 800;
+  cursor: pointer;
+  transition: background 0.18s ease, transform 0.18s ease;
+}
+
+.current-user-avatar:hover {
+  background: #ffd399;
+  transform: translateY(-1px);
+}
+
+.current-user-avatar:focus-visible {
+  outline: 2px solid #fff;
+  outline-offset: 2px;
+}
+
+.user-dropdown-option {
+  min-width: 210px;
+  gap: 8px;
+}
+
+.user-dropdown-option.is-current {
+  color: var(--green);
+  background: #edf7f4;
+  font-weight: 700;
+}
+
+.user-menu-avatar {
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  display: grid;
+  flex: 0 0 26px;
+  place-items: center;
+  color: #10243a;
+  background: #f8c27a;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.user-menu-name {
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.user-role-tag,
+.user-status-tag {
+  min-height: 20px;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  display: inline-flex;
+  align-items: center;
+  padding: 0 6px;
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1;
+  white-space: nowrap;
+}
+
+.user-role-tag {
+  margin-left: auto;
+}
+
+.user-role-tag.is-admin {
+  color: #9a5700;
+  border-color: #f1c66f;
+  background: #fff0cc;
+}
+
+.user-role-tag.is-manager {
+  color: #0f766e;
+  border-color: #a9d9c9;
+  background: #e4f5ef;
+}
+
+.user-role-tag.is-clerk {
+  color: #315b8a;
+  border-color: #bad0eb;
+  background: #e8f0fb;
+}
+
+.user-status-tag {
+  color: #be3455;
+  border-color: #efbac8;
+  background: #fce7ec;
 }
 
 .logout-button {
   width: 100%;
+  min-height: 42px;
+  margin-left: 0;
   color: rgba(248, 250, 252, 0.9);
   border-color: rgba(255, 255, 255, 0.2);
   background: rgba(255, 255, 255, 0.08);
@@ -435,6 +536,10 @@ input {
 
 .full-control,
 .el-segmented {
+  width: 100%;
+}
+
+.el-date-editor.full-control {
   width: 100%;
 }
 
@@ -865,6 +970,76 @@ input {
     padding: 12px 12px 88px;
   }
 
+  .side-nav {
+    grid-template-areas:
+      "brand user"
+      "nav nav";
+    grid-template-columns: minmax(0, 1fr) auto;
+    grid-template-rows: auto auto;
+    align-items: center;
+    column-gap: 10px;
+    row-gap: 12px;
+  }
+
+  .side-nav > .brand-block {
+    grid-area: brand;
+    min-width: 0;
+    gap: 8px;
+  }
+
+  .side-nav > .nav-list {
+    grid-area: nav;
+  }
+
+  .side-nav > .current-user {
+    grid-area: user;
+    width: auto;
+    min-width: 0;
+    display: flex;
+    align-items: center;
+    justify-self: end;
+    gap: 6px;
+    padding-top: 0;
+    border-top: 0;
+  }
+
+  .current-user > span {
+    display: none;
+  }
+
+  .current-user .el-dropdown,
+  .current-user-avatar {
+    width: 34px;
+    height: 34px;
+  }
+
+  .logout-button {
+    width: 34px;
+    min-width: 34px;
+    height: 34px;
+    min-height: 34px;
+    margin-left: 0;
+    padding: 0;
+  }
+
+  .logout-label {
+    display: none;
+  }
+
+  .side-nav .brand-mark {
+    width: 36px;
+    height: 36px;
+    flex: 0 0 36px;
+    border-radius: 8px;
+  }
+
+  .side-nav .brand-block strong {
+    overflow: hidden;
+    font-size: 16px;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+  }
+
   .brand-block small,
   .topbar-actions {
     display: none;
@@ -956,5 +1131,11 @@ input {
     color: #fff;
     background: #10243a;
     box-shadow: 0 14px 32px rgba(16, 36, 58, 0.3);
+  }
+}
+
+@media (max-width: 360px) {
+  .side-nav > .brand-block .brand-mark {
+    display: none;
   }
 }
