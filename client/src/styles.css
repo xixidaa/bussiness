@@ -742,7 +742,7 @@ input {
   font-size: 22px;
 }
 
-.record-card span,
+.record-card .record-meta,
 .record-card p {
   color: var(--muted);
   font-size: 13px;
@@ -913,6 +913,8 @@ input {
 
   .app-shell {
     grid-template-columns: 1fr;
+    grid-template-rows: auto auto;
+    align-content: start;
   }
 
   .side-nav {

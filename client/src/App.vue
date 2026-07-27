@@ -424,7 +424,9 @@
                       {{ channelText(item.channel) }}
                     </el-tag>
                   </div>
-                  <span>{{ formatPeriodLabel(item.granularity, item.period) }} · {{ granularityText(item.granularity) }} · {{ entryModeText(item.entryMode) }}</span>
+                  <span class="record-meta">
+                    {{ formatPeriodLabel(item.granularity, item.period) }} · {{ granularityText(item.granularity) }} · {{ entryModeText(item.entryMode) }}
+                  </span>
                   <p v-if="item.remark">{{ item.remark }}</p>
                 </div>
                 <div class="record-card-actions">
