@@ -195,8 +195,8 @@
                 <label>统计粒度</label>
                 <el-segmented v-model="analytics.dimension" :options="analyticsGranularityOptions" @change="handleAnalyticsDimensionChange" />
               </div>
-              <div v-if="analytics.range === 'current'" class="field">
-                <label>统计周期</label>
+              <div v-if="analytics.range === 'current' || analytics.range === 'yearCompare'" class="field">
+                <label>{{ analytics.dimension === 'year' ? '对比年份' : '统计周期' }}</label>
                 <el-date-picker
                   v-if="analytics.dimension !== 'year'"
                   v-model="analytics.period"
@@ -270,22 +270,40 @@
                 <summary>查看趋势明细</summary>
                 <div class="chart-data-scroll">
                   <table>
-                    <thead>
-                      <tr>
-                        <th>周期</th>
-                        <th v-for="item in dashboardChannelOptions" :key="`head-${item.value}`">{{ item.label }}</th>
-                        <th>合计</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      <tr v-for="row in visibleTrendRows" :key="`trend-${row.period}`">
-                        <td>{{ formatPeriodLabel(analytics.dimension, row.period) }}</td>
-                        <td v-for="item in dashboardChannelOptions" :key="`${row.period}-${item.value}`">
-                          {{ formatChartValue(row.summary[item.value]?.[analytics.metric]) }}
-                        </td>
-                        <td>{{ formatChartValue(row.summary.total?.[analytics.metric]) }}</td>
-                      </tr>
-                    </tbody>
+                    <template v-if="isYearComparison">
+                      <thead>
+                        <tr>
+                          <th>月份</th>
+                          <th v-for="year in analytics.years" :key="`year-head-${year}`">{{ year }} 年</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        <tr v-for="month in 12" :key="`compare-month-${month}`">
+                          <td>{{ month }} 月</td>
+                          <td v-for="year in analytics.years" :key="`${year}-${month}`">
+                            {{ formatChartValue(yearComparisonValue(year, month)) }}
+                          </td>
+                        </tr>
+                      </tbody>
+                    </template>
+                    <template v-else>
+                      <thead>
+                        <tr>
+                          <th>周期</th>
+                          <th v-for="item in dashboardChannelOptions" :key="`head-${item.value}`">{{ item.label }}</th>
+                          <th>合计</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        <tr v-for="row in visibleTrendRows" :key="`trend-${row.period}`">
+                          <td>{{ formatPeriodLabel(analytics.dimension, row.period) }}</td>
+                          <td v-for="item in dashboardChannelOptions" :key="`${row.period}-${item.value}`">
+                            {{ formatChartValue(row.summary[item.value]?.[analytics.metric]) }}
+                          </td>
+                          <td>{{ formatChartValue(row.summary.total?.[analytics.metric]) }}</td>
+                        </tr>
+                      </tbody>
+                    </template>
                   </table>
                 </div>
               </details>
@@ -907,6 +925,7 @@
                   <el-option label="当前周期" value="current" />
                   <el-option label="近 7 天" value="last7" />
                   <el-option label="近 12 个月" value="last12" />
+                  <el-option label="年度对比" value="yearCompare" />
                 </el-select>
               </div>
             </div>
@@ -999,7 +1018,8 @@ const analyticsGranularityOptions = [
 const analyticsRangeOptions = [
   { label: '当前周期', value: 'current' },
   { label: '近 7 天', value: 'last7' },
-  { label: '近 12 个月', value: 'last12' }
+  { label: '近 12 个月', value: 'last12' },
+  { label: '年度对比', value: 'yearCompare' }
 ];
 
 const entryGranularityOptions = [
@@ -1062,8 +1082,22 @@ const settings = reactive({
 
 const analytics = reactive({
   range: settings.defaultRange || 'current',
-  dimension: settings.defaultRange === 'last7' ? 'day' : settings.defaultRange === 'last12' ? 'month' : (settings.defaultDimension || 'month'),
-  period: getCurrentPeriod(settings.defaultRange === 'last7' ? 'day' : settings.defaultRange === 'last12' ? 'month' : (settings.defaultDimension || 'month')),
+  dimension: settings.defaultRange === 'last7'
+    ? 'day'
+    : settings.defaultRange === 'last12'
+      ? 'month'
+      : settings.defaultRange === 'yearCompare'
+        ? 'year'
+        : (settings.defaultDimension || 'month'),
+  period: getCurrentPeriod(
+    settings.defaultRange === 'last7'
+      ? 'day'
+      : settings.defaultRange === 'last12'
+        ? 'month'
+        : settings.defaultRange === 'yearCompare'
+          ? 'year'
+          : (settings.defaultDimension || 'month')
+  ),
   years: defaultCompareYears(),
   channel: 'all',
   metric: 'amount'
@@ -1157,9 +1191,12 @@ const recordFilterPeriodLabel = computed(() => (recordFilters.granularity === 'm
 const visibleSummary = computed(() => filterSummaryByChannel(summary, analytics.channel));
 const visibleCompareSummary = computed(() => filterSummaryByChannel(compareSummary, analytics.channel));
 const visibleTrendRows = computed(() => trendRows.value.map((item) => ({ ...item, summary: filterSummaryByChannel(item.summary, analytics.channel) })));
+const isYearComparison = computed(() => analytics.dimension === 'year');
+const trendDisplayDimension = computed(() => (isYearComparison.value ? 'month' : analytics.dimension));
 const analyticsRangeLabel = computed(() => {
   if (analytics.range === 'last7') return `截至 ${formatPeriodLabel('day', analytics.period)}的 7 天`;
   if (analytics.range === 'last12') return `截至 ${formatPeriodLabel('month', analytics.period)}的 12 个月`;
+  if (isYearComparison.value) return `${analytics.years.join('、')} 年月度趋势对比`;
   return formatPeriodLabel(analytics.dimension, analytics.period);
 });
 
@@ -1189,10 +1226,13 @@ const shareRows = computed(() => {
 const positiveShareRows = computed(() => shareRows.value.filter((item) => item.value > 0));
 const trendChartDescription = computed(() => {
   if (visibleTrendRows.value.length === 0) return '收款趋势图，当前筛选范围暂无数据。';
+  if (isYearComparison.value) {
+    return `年度趋势对比图，对比${analytics.years.map((year) => `${year}年`).join('、')}的 1 至 12 月${analytics.metric === 'amount' ? '收款金额' : '收款人数'}。`;
+  }
   const first = visibleTrendRows.value[0];
   const last = visibleTrendRows.value.at(-1);
   const total = visibleTrendRows.value.reduce((sum, item) => sum + Number(item.summary?.total?.[analytics.metric] || 0), 0);
-  return `收款趋势图，从${formatPeriodLabel(analytics.dimension, first.period)}到${formatPeriodLabel(analytics.dimension, last.period)}，${analytics.metric === 'amount' ? '合计金额' : '合计人数'}${formatChartValue(total)}。`;
+  return `收款趋势图，从${formatPeriodLabel(trendDisplayDimension.value, first.period)}到${formatPeriodLabel(trendDisplayDimension.value, last.period)}，${analytics.metric === 'amount' ? '合计金额' : '合计人数'}${formatChartValue(total)}。`;
 });
 const mixChartDescription = computed(() => {
   if (positiveShareRows.value.length === 0) return '渠道占比图，当前筛选范围暂无渠道数据。';
@@ -1237,7 +1277,7 @@ const anomalyRows = computed(() => {
   if (latest && previous && previous.summary.total.amount > 0) {
     const drop = (previous.summary.total.amount - latest.summary.total.amount) / previous.summary.total.amount;
     if (drop >= 0.3) {
-      rows.push({ key: 'drop', level: 'danger', title: '金额突降', desc: `${formatPeriodLabel(analytics.dimension, latest.period)} 较上一周期下降 ${Math.round(drop * 100)}%` });
+      rows.push({ key: 'drop', level: 'danger', title: '金额突降', desc: `${formatPeriodLabel(trendDisplayDimension.value, latest.period)} 较上一周期下降 ${Math.round(drop * 100)}%` });
     }
   }
   for (const item of dashboardChannelOptions.value) {
@@ -1338,6 +1378,12 @@ function formatAverage(value) {
 function formatChartValue(value) {
   const number = Number(value || 0);
   return analytics.metric === 'amount' ? money(number) : `${number} 人`;
+}
+
+function yearComparisonValue(year, month) {
+  const period = `${year}-${pad(month)}`;
+  const row = visibleTrendRows.value.find((item) => item.period === period);
+  return Number(row?.summary?.total?.[analytics.metric] || 0);
 }
 
 function averageFromSummary(data) {
@@ -1528,6 +1574,10 @@ function handleAnalyticsRangeChange(nextValue) {
   } else if (nextValue === 'last12') {
     analytics.dimension = 'month';
     analytics.period = getCurrentPeriod('month');
+  } else if (nextValue === 'yearCompare') {
+    analytics.dimension = 'year';
+    if (analytics.years.length === 0) analytics.years = defaultCompareYears();
+    analytics.period = analytics.years.at(-1) || getCurrentPeriod('year');
   } else {
     analytics.dimension = settings.defaultDimension || 'month';
     analytics.period = getCurrentPeriod(analytics.dimension);
@@ -1538,6 +1588,7 @@ function handleAnalyticsRangeChange(nextValue) {
 function handleYearSelectionChange() {
   analyticsFallbackNotice.value = '';
   if (analytics.years.length === 0) analytics.years = defaultCompareYears();
+  analytics.years = [...analytics.years].sort();
   analytics.period = analytics.years[analytics.years.length - 1] || getCurrentPeriod('year');
   refreshAnalytics();
 }
@@ -1764,7 +1815,7 @@ async function refreshAnalytics() {
   if (!isLoggedIn.value) return;
   analyticsLoading.value = true;
   try {
-    if (analytics.range !== 'current') {
+    if (['last7', 'last12'].includes(analytics.range)) {
       const count = analytics.range === 'last7' ? 7 : 12;
       const dimension = analytics.range === 'last7' ? 'day' : 'month';
       const rawTrend = await receiptApi.trend({ dimension });
@@ -1787,12 +1838,16 @@ async function refreshAnalytics() {
       assignSummary(summary, summarizeTrendRows(currentRows));
       assignSummary(compareSummary, summarizeTrendRows(previousRows));
     } else if (analytics.dimension === 'year') {
-      const rawTrend = await receiptApi.trend({ dimension: 'year' });
-      const allTrend = Array.isArray(rawTrend) ? rawTrend : [];
+      const [rawAnnualTrend, rawMonthlyTrend] = await Promise.all([
+        receiptApi.trend({ dimension: 'year' }),
+        receiptApi.trend({ dimension: 'month' })
+      ]);
+      const annualTrend = Array.isArray(rawAnnualTrend) ? rawAnnualTrend : [];
+      const monthlyTrend = Array.isArray(rawMonthlyTrend) ? rawMonthlyTrend : [];
       let years = analytics.years.length ? analytics.years : defaultCompareYears();
       if (analyticsInitialLoad.value) {
-        const currentRow = allTrend.find((item) => item.period === getCurrentPeriod('year'));
-        const latest = latestDataPeriod(allTrend);
+        const currentRow = annualTrend.find((item) => item.period === getCurrentPeriod('year'));
+        const latest = latestDataPeriod(annualTrend);
         if (!Number(currentRow?.summary?.total?.amount || 0) && latest && latest !== getCurrentPeriod('year')) {
           years = [String(Number(latest) - 1), latest];
           analytics.years = years;
@@ -1802,7 +1857,7 @@ async function refreshAnalytics() {
       }
       const summaryResults = await Promise.all(years.map((year) => receiptApi.summary({ dimension: 'year', period: year })));
       yearCompareSummaries.value = years.map((year, index) => ({ period: year, summary: summaryResults[index]?.summary || createSummaryState() }));
-      trendRows.value = allTrend.filter((item) => years.includes(item.period));
+      trendRows.value = monthlyTrend.filter((item) => years.includes(item.period.slice(0, 4)));
       const current = yearCompareSummaries.value.find((item) => item.period === analytics.period) || yearCompareSummaries.value.at(-1);
       const previous = yearCompareSummaries.value.find((item) => item.period === String(Number(current?.period || 0) - 1)) || yearCompareSummaries.value[0];
       assignSummary(summary, current?.summary);
@@ -2201,8 +2256,41 @@ function renderTrendChart() {
   if (!trendChart) return;
   const unit = analytics.metric === 'amount' ? '元' : '人';
   const rows = visibleTrendRows.value;
-  const singlePoint = rows.length <= 1;
   const mobile = window.matchMedia('(max-width: 760px)').matches;
+  if (isYearComparison.value) {
+    const months = Array.from({ length: 12 }, (_, index) => index + 1);
+    const hasYearData = analytics.years.some((year) => months.some((month) => yearComparisonValue(year, month) > 0));
+    trendChart.setOption({
+      aria: { enabled: true, description: trendChartDescription.value },
+      color: ['#0f766e', '#2563eb', '#d97706', '#be3455', '#7c3aed', '#0891b2'],
+      tooltip: { trigger: 'axis', valueFormatter: (value) => `${value}${unit}` },
+      graphic: hasYearData
+        ? []
+        : [{ type: 'text', left: 'center', top: 'middle', style: { text: '所选年份暂无月度数据', fill: '#667789', fontSize: 14 } }],
+      legend: { type: 'scroll', top: 0, data: analytics.years.map((year) => `${year} 年`) },
+      grid: { top: 52, left: mobile ? 4 : 12, right: mobile ? 8 : 18, bottom: 14, containLabel: true },
+      xAxis: {
+        type: 'category',
+        boundaryGap: false,
+        data: months.map((month) => `${month}月`)
+      },
+      yAxis: {
+        type: 'value',
+        axisLabel: { formatter: (value) => mobile && value >= 10000 ? `${Math.round(value / 1000)}k` : `${value}${unit}` }
+      },
+      series: analytics.years.map((year) => ({
+        name: `${year} 年`,
+        type: 'line',
+        smooth: true,
+        symbolSize: 7,
+        connectNulls: false,
+        data: months.map((month) => yearComparisonValue(year, month))
+      }))
+    }, true);
+    trendChart.resize();
+    return;
+  }
+  const singlePoint = rows.length <= 1;
   const seriesFor = (channel) => rows.map((item) => Number(item.summary?.[channel]?.[analytics.metric] || 0));
   trendChart.setOption({
     aria: { enabled: true, description: trendChartDescription.value },
