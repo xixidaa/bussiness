@@ -96,13 +96,32 @@
           :key="item.value"
           type="button"
           class="nav-item"
-          :class="{ active: activeView === item.value }"
+          :class="{ active: activeView === item.value, 'is-mobile-secondary': item.secondary }"
           @click="switchView(item.value)"
         >
           <el-icon><component :is="item.icon" /></el-icon>
           <span>{{ item.label }}</span>
           <small>{{ item.shortLabel }}</small>
         </button>
+        <el-dropdown class="mobile-nav-more" trigger="click" placement="bottom-end" @command="switchView">
+          <button
+            type="button"
+            class="nav-item"
+            :class="{ active: secondaryNavItems.some((item) => item.value === activeView) }"
+            aria-label="更多功能"
+          >
+            <el-icon><MoreFilled /></el-icon>
+            <small>更多</small>
+          </button>
+          <template #dropdown>
+            <el-dropdown-menu>
+              <el-dropdown-item v-for="item in secondaryNavItems" :key="item.value" :command="item.value">
+                <el-icon><component :is="item.icon" /></el-icon>
+                {{ item.label }}
+              </el-dropdown-item>
+            </el-dropdown-menu>
+          </template>
+        </el-dropdown>
       </nav>
 
       <div class="current-user">
@@ -165,12 +184,18 @@
       <main class="workspace">
         <section v-if="activeView === 'dashboard'" class="page-stack" v-loading="analyticsLoading">
           <section class="panel compact-panel">
-            <div class="filter-row">
+            <div class="filter-row dashboard-filter-row">
               <div class="field">
+                <label>时间范围</label>
+                <el-select v-model="analytics.range" class="full-control" @change="handleAnalyticsRangeChange">
+                  <el-option v-for="item in analyticsRangeOptions" :key="item.value" :label="item.label" :value="item.value" />
+                </el-select>
+              </div>
+              <div v-if="analytics.range === 'current'" class="field">
                 <label>统计粒度</label>
                 <el-segmented v-model="analytics.dimension" :options="analyticsGranularityOptions" @change="handleAnalyticsDimensionChange" />
               </div>
-              <div class="field">
+              <div v-if="analytics.range === 'current'" class="field">
                 <label>统计周期</label>
                 <el-date-picker
                   v-if="analytics.dimension !== 'year'"
@@ -181,7 +206,7 @@
                   :placeholder="analyticsPicker.placeholder"
                   class="full-control"
                   :editable="false"
-                  @change="refreshAnalytics"
+                  @change="refreshAnalyticsFromFilter"
                 />
                 <el-select
                   v-else
@@ -195,9 +220,13 @@
                   <el-option v-for="year in yearOptions" :key="year" :label="`${year} 年`" :value="year" />
                 </el-select>
               </div>
+              <div v-else class="field">
+                <label>当前展示</label>
+                <div class="range-readout">{{ analyticsRangeLabel }}</div>
+              </div>
               <div class="field">
                 <label>渠道</label>
-                <el-select v-model="analytics.channel" class="full-control" @change="refreshAnalytics">
+                <el-select v-model="analytics.channel" class="full-control" @change="refreshAnalyticsFromFilter">
                   <el-option v-for="item in channelFilterOptions" :key="item.value" :label="item.label" :value="item.value" />
                 </el-select>
               </div>
@@ -209,6 +238,15 @@
               </div>
             </div>
           </section>
+
+          <el-alert
+            v-if="analyticsFallbackNotice"
+            class="context-alert"
+            type="info"
+            :closable="false"
+            show-icon
+            :title="analyticsFallbackNotice"
+          />
 
           <section class="metric-grid">
             <article v-for="item in metricCards" :key="item.key" class="metric-card" :class="item.className">
@@ -227,7 +265,30 @@
                 </div>
                 <el-segmented v-model="analytics.metric" :options="metricOptions" @change="renderCharts" />
               </div>
-              <div ref="trendChartRef" class="chart-box"></div>
+              <div ref="trendChartRef" class="chart-box" role="img" :aria-label="trendChartDescription"></div>
+              <details class="chart-data-details">
+                <summary>查看趋势明细</summary>
+                <div class="chart-data-scroll">
+                  <table>
+                    <thead>
+                      <tr>
+                        <th>周期</th>
+                        <th v-for="item in dashboardChannelOptions" :key="`head-${item.value}`">{{ item.label }}</th>
+                        <th>合计</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      <tr v-for="row in visibleTrendRows" :key="`trend-${row.period}`">
+                        <td>{{ formatPeriodLabel(analytics.dimension, row.period) }}</td>
+                        <td v-for="item in dashboardChannelOptions" :key="`${row.period}-${item.value}`">
+                          {{ formatChartValue(row.summary[item.value]?.[analytics.metric]) }}
+                        </td>
+                        <td>{{ formatChartValue(row.summary.total?.[analytics.metric]) }}</td>
+                      </tr>
+                    </tbody>
+                  </table>
+                </div>
+              </details>
             </article>
 
             <article class="panel">
@@ -237,12 +298,13 @@
                   <h2>渠道占比</h2>
                 </div>
               </div>
-              <div ref="mixChartRef" class="mix-chart"></div>
+              <div ref="mixChartRef" class="mix-chart" role="img" :aria-label="mixChartDescription"></div>
               <div class="mix-list">
-                <div v-for="item in shareRows" :key="item.key" class="mix-row">
+                <div v-for="item in positiveShareRows" :key="item.key" class="mix-row">
                   <span>{{ item.label }}</span>
                   <strong>{{ item.percent }}%</strong>
                 </div>
+                <el-empty v-if="positiveShareRows.length === 0" :image-size="56" description="当前范围暂无渠道数据" />
               </div>
             </article>
           </section>
@@ -305,12 +367,12 @@
                   clearable
                   class="full-control"
                   :editable="false"
-                  @change="refreshRecords"
+                  @change="refreshRecordsFromFilter"
                 />
               </div>
               <div class="field">
                 <label>渠道</label>
-                <el-select v-model="recordFilters.channel" class="full-control" @change="refreshRecords">
+                <el-select v-model="recordFilters.channel" class="full-control" @change="refreshRecordsFromFilter">
                   <el-option v-for="item in channelFilterOptions" :key="item.value" :label="item.label" :value="item.value" />
                 </el-select>
               </div>
@@ -330,6 +392,15 @@
               </div>
             </div>
           </section>
+
+          <el-alert
+            v-if="recordFallbackNotice"
+            class="context-alert"
+            type="info"
+            :closable="false"
+            show-icon
+            :title="recordFallbackNotice"
+          />
 
           <section class="summary-strip">
             <article>
@@ -419,7 +490,14 @@
               <article v-for="item in pagedRecords" :key="`card-${item.id}`" class="record-card">
                 <div>
                   <div class="record-top">
-                    <strong>{{ money(getEffectiveAmount(item)) }}</strong>
+                    <div class="record-amount-select">
+                      <el-checkbox
+                        :model-value="isRecordSelected(item.id)"
+                        :aria-label="`选择 ${formatPeriodLabel(item.granularity, item.period)} 的收款记录`"
+                        @change="toggleRecordSelection(item, $event)"
+                      />
+                      <strong>{{ money(getEffectiveAmount(item)) }}</strong>
+                    </div>
                     <el-tag class="channel-tag" :class="channelTagClass(item.channel)">
                       {{ channelText(item.channel) }}
                     </el-tag>
@@ -430,9 +508,15 @@
                   <p v-if="item.remark">{{ item.remark }}</p>
                 </div>
                 <div class="record-card-actions">
-                  <el-button text type="primary" @click="startEdit(item)">编辑</el-button>
+                  <el-button circle type="primary" plain aria-label="编辑收款" title="编辑收款" @click="startEdit(item)">
+                    <el-icon><Edit /></el-icon>
+                  </el-button>
                   <el-popconfirm title="确认删除这条记录吗？" @confirm="deleteItem(item.id)">
-                    <template #reference><el-button text type="danger">删除</el-button></template>
+                    <template #reference>
+                      <el-button circle type="danger" plain aria-label="删除收款" title="删除收款">
+                        <el-icon><Delete /></el-icon>
+                      </el-button>
+                    </template>
                   </el-popconfirm>
                 </div>
               </article>
@@ -499,10 +583,21 @@
                 <el-input v-model="form.remark" type="textarea" :rows="4" maxlength="200" show-word-limit placeholder="可填写活动、退款、异常波动等说明" />
               </el-form-item>
             </el-form>
-            <div class="form-actions">
-              <el-button @click="resetFormForCreate">清空</el-button>
-              <el-button :loading="saving" @click="submitForm(false)">保存</el-button>
-              <el-button type="primary" :loading="saving" @click="submitForm(true)">保存并继续</el-button>
+            <div class="mobile-entry-checks">
+              <strong>录入校验</strong>
+              <ul class="check-list">
+                <li :class="{ pass: Number(form.amount) > 0 }">金额必须大于 0</li>
+                <li :class="{ pass: Number.isInteger(Number(form.people)) && Number(form.people) >= 0 }">人数不可为负</li>
+                <li :class="{ pass: isPeriodInRange(form.granularity, form.period) }">日期不可超出允许范围</li>
+                <li :class="{ pass: Boolean(form.channel) }">渠道来自启用配置</li>
+              </ul>
+            </div>
+            <div class="form-actions entry-actions">
+              <el-popconfirm title="确认清空当前填写内容吗？" @confirm="resetFormForCreate">
+                <template #reference><el-button class="clear-entry-button" text type="danger">清空内容</el-button></template>
+              </el-popconfirm>
+              <el-button class="save-entry-button" :loading="saving" @click="submitForm(false)">保存</el-button>
+              <el-button class="continue-entry-button" type="primary" :loading="saving" @click="submitForm(true)">保存并继续</el-button>
             </div>
           </section>
 
@@ -574,7 +669,7 @@
               </article>
             </section>
 
-            <el-table :data="importPreview" border stripe max-height="420" class="import-table">
+            <el-table :data="importPreview" border stripe max-height="420" class="import-table responsive-table">
               <el-table-column prop="rowNumber" label="行号" width="72" />
               <el-table-column prop="period" label="日期/周期" min-width="116" />
               <el-table-column prop="granularity" label="粒度" width="90">
@@ -596,6 +691,31 @@
               </el-table-column>
             </el-table>
 
+            <div class="mobile-data-list import-mobile-list">
+              <article v-for="row in importPreview" :key="`import-${row.rowNumber}`" class="mobile-data-card import-row-card">
+                <div class="mobile-card-heading">
+                  <strong>第 {{ row.rowNumber }} 行</strong>
+                  <el-tag :type="row.errors.length === 0 ? 'success' : 'danger'">
+                    {{ row.errors.length === 0 ? '校验通过' : `${row.errors.length} 项异常` }}
+                  </el-tag>
+                </div>
+                <dl class="mobile-detail-grid">
+                  <div><dt>日期/周期</dt><dd>{{ row.period || '-' }}</dd></div>
+                  <div><dt>粒度</dt><dd>{{ granularityText(row.granularity) }}</dd></div>
+                  <div>
+                    <dt>渠道</dt>
+                    <dd><el-tag class="channel-tag" :class="channelTagClass(row.channel)">{{ channelText(row.channel) }}</el-tag></dd>
+                  </div>
+                  <div><dt>金额 / 人数</dt><dd>{{ money(row.amount) }} / {{ row.people }} 人</dd></div>
+                </dl>
+                <p v-if="row.remark" class="mobile-card-note">{{ row.remark }}</p>
+                <div v-if="row.errors.length" class="error-tags">
+                  <el-tag v-for="error in row.errors" :key="error" type="danger">{{ error }}</el-tag>
+                </div>
+              </article>
+              <el-empty v-if="importPreview.length === 0" :image-size="72" description="上传文件后在这里查看逐行校验结果" />
+            </div>
+
             <div class="form-actions">
               <el-button @click="exportRecords">导出当前筛选结果</el-button>
               <el-button @click="exportDashboard">导出看板汇总报表</el-button>
@@ -603,6 +723,7 @@
                 只导入通过校验的数据
               </el-button>
             </div>
+            <p v-if="validImportRows.length === 0" class="action-hint">上传文件并至少通过一行校验后即可导入。</p>
           </section>
         </section>
 
@@ -618,7 +739,7 @@
                 新增用户
               </el-button>
             </div>
-            <el-table :data="usersWithProfiles" border stripe>
+            <el-table :data="usersWithProfiles" border stripe class="responsive-table">
               <el-table-column prop="name" label="用户" min-width="140" />
               <el-table-column prop="role" label="角色" min-width="150">
                 <template #default="{ row }">
@@ -648,6 +769,39 @@
                 <template #default="{ row }">{{ formatDateTime(row.createdAt) }}</template>
               </el-table-column>
             </el-table>
+
+            <div class="mobile-data-list user-mobile-list">
+              <article v-for="row in usersWithProfiles" :key="`user-${row.id}`" class="mobile-data-card user-card">
+                <div class="mobile-card-heading">
+                  <div class="mobile-user-identity">
+                    <span class="user-menu-avatar">{{ userInitial(row) }}</span>
+                    <div>
+                      <strong>{{ row.name }}</strong>
+                      <small>{{ formatDateTime(row.createdAt) }}</small>
+                    </div>
+                  </div>
+                  <el-switch
+                    v-model="row.profile.status"
+                    active-value="enabled"
+                    inactive-value="disabled"
+                    inline-prompt
+                    active-text="启"
+                    inactive-text="停"
+                    :aria-label="`${row.name}账号状态`"
+                    @change="saveUserProfiles"
+                  />
+                </div>
+                <div class="field">
+                  <label>角色</label>
+                  <el-select v-model="row.profile.role" class="full-control" @change="saveUserProfiles">
+                    <el-option label="管理员" value="admin" />
+                    <el-option label="老板/店长" value="manager" />
+                    <el-option label="店员" value="clerk" />
+                  </el-select>
+                </div>
+                <p class="mobile-card-note"><strong>授权范围：</strong>{{ roleScopeText(row.profile.role) }}</p>
+              </article>
+            </div>
           </section>
         </section>
 
@@ -681,7 +835,7 @@
                 <h2>操作日志</h2>
               </div>
             </div>
-            <el-table :data="filteredLogs" border stripe>
+            <el-table :data="filteredLogs" border stripe class="responsive-table">
               <el-table-column prop="time" label="时间" min-width="160">
                 <template #default="{ row }">{{ formatDateTime(row.time) }}</template>
               </el-table-column>
@@ -689,6 +843,18 @@
               <el-table-column prop="action" label="操作" width="120" />
               <el-table-column prop="detail" label="变更内容" min-width="260" show-overflow-tooltip />
             </el-table>
+
+            <div class="mobile-data-list log-mobile-list">
+              <article v-for="row in filteredLogs" :key="`log-${row.id}`" class="mobile-data-card log-card">
+                <div class="mobile-card-heading">
+                  <el-tag type="info">{{ row.action }}</el-tag>
+                  <time>{{ formatDateTime(row.time) }}</time>
+                </div>
+                <p class="log-detail">{{ row.detail }}</p>
+                <span class="log-user">操作人：{{ row.userName || '-' }}</span>
+              </article>
+              <el-empty v-if="filteredLogs.length === 0" :image-size="72" description="暂无符合条件的操作日志" />
+            </div>
           </section>
         </section>
 
@@ -699,12 +865,13 @@
                 <span class="eyebrow">Channels</span>
                 <h2>渠道配置</h2>
               </div>
+              <el-tag v-if="settingsSavedAt" type="success" effect="plain">已自动保存 {{ settingsSavedAt }}</el-tag>
             </div>
             <div class="setting-list">
               <div v-for="item in channelOptions" :key="item.value" class="setting-row">
                 <div>
                   <strong>{{ item.label }}</strong>
-                  <span>{{ item.value }}</span>
+                  <span>启用后可在录入、筛选和导入中使用</span>
                 </div>
                 <el-switch v-model="settings.channels[item.value]" @change="saveSettings" />
               </div>
@@ -736,7 +903,7 @@
               </div>
               <div class="field">
                 <label>看板默认时间范围</label>
-                <el-select v-model="settings.defaultRange" class="full-control" @change="saveSettings">
+                <el-select v-model="settings.defaultRange" class="full-control" @change="handleDefaultRangeSettingChange">
                   <el-option label="当前周期" value="current" />
                   <el-option label="近 7 天" value="last7" />
                   <el-option label="近 12 个月" value="last12" />
@@ -748,7 +915,7 @@
       </main>
     </div>
 
-    <button type="button" class="mobile-fab" @click="openCreate">
+    <button v-if="['dashboard', 'ledger'].includes(activeView)" type="button" class="mobile-fab" @click="openCreate">
       <el-icon><Plus /></el-icon>
       新建收款
     </button>
@@ -778,6 +945,7 @@ import {
   Download,
   Edit,
   Files,
+  MoreFilled,
   Plus,
   Refresh,
   Search,
@@ -811,19 +979,27 @@ const channelTagClasses = {
 };
 
 const navItems = [
-  { value: 'dashboard', label: '经营看板', shortLabel: '看板', kicker: 'Dashboard', title: '首页 / 经营看板', desc: '10 秒内看懂今日、本月、本年的收款表现。', icon: DataAnalysis },
+  { value: 'dashboard', label: '经营看板', shortLabel: '看板', kicker: 'Dashboard', title: '首页 / 经营看板', desc: '快速掌握当前范围的金额、人数、客单价和渠道结构。', icon: DataAnalysis },
   { value: 'ledger', label: '收款台账', shortLabel: '台账', kicker: 'Ledger', title: '收款台账', desc: '集中筛选、修改、删除和导出所有收款记录。', icon: Tickets },
   { value: 'record', label: '新建/编辑', shortLabel: '录入', kicker: 'Entry', title: '新建 / 编辑收款', desc: '服务高频录入，支持保存并继续和草稿自动保存。', icon: Edit },
   { value: 'import', label: '导入导出', shortLabel: '导入', kicker: 'Excel', title: '批量导入导出', desc: '先预校验，再确认字段映射和渠道规则。', icon: Upload },
-  { value: 'users', label: '用户权限', shortLabel: '用户', kicker: 'Access', title: '用户与权限', desc: '管理多人使用、角色分级和启停状态。', icon: User },
-  { value: 'logs', label: '操作日志', shortLabel: '日志', kicker: 'Audit', title: '操作日志', desc: '追踪新增、编辑、删除、导入、导出和登录行为。', icon: Files },
-  { value: 'settings', label: '系统配置', shortLabel: '配置', kicker: 'Settings', title: '系统配置', desc: '配置渠道、门店、统计口径和导入字段。', icon: Setting }
+  { value: 'users', label: '用户权限', shortLabel: '用户', kicker: 'Access', title: '用户与权限', desc: '管理多人使用、角色分级和启停状态。', icon: User, secondary: true },
+  { value: 'logs', label: '操作日志', shortLabel: '日志', kicker: 'Audit', title: '操作日志', desc: '追踪新增、编辑、删除、导入、导出和登录行为。', icon: Files, secondary: true },
+  { value: 'settings', label: '系统配置', shortLabel: '配置', kicker: 'Settings', title: '系统配置', desc: '配置渠道、门店、统计口径和导入字段。', icon: Setting, secondary: true }
 ];
+
+const secondaryNavItems = navItems.filter((item) => item.secondary);
 
 const analyticsGranularityOptions = [
   { label: '年', value: 'year' },
   { label: '月', value: 'month' },
   { label: '日', value: 'day' }
+];
+
+const analyticsRangeOptions = [
+  { label: '当前周期', value: 'current' },
+  { label: '近 7 天', value: 'last7' },
+  { label: '近 12 个月', value: 'last12' }
 ];
 
 const entryGranularityOptions = [
@@ -853,6 +1029,11 @@ const selectedRows = ref([]);
 const operationLogs = ref(readJson(LOG_KEY, []));
 const userProfiles = ref(readJson(USER_PROFILE_KEY, {}));
 const draftSavedAt = ref('');
+const analyticsFallbackNotice = ref('');
+const recordFallbackNotice = ref('');
+const settingsSavedAt = ref('');
+const analyticsInitialLoad = ref(true);
+const recordsInitialLoad = ref(true);
 
 const trendChartRef = ref();
 const mixChartRef = ref();
@@ -880,8 +1061,9 @@ const settings = reactive({
 });
 
 const analytics = reactive({
-  dimension: settings.defaultDimension || 'month',
-  period: getCurrentPeriod(settings.defaultDimension || 'month'),
+  range: settings.defaultRange || 'current',
+  dimension: settings.defaultRange === 'last7' ? 'day' : settings.defaultRange === 'last12' ? 'month' : (settings.defaultDimension || 'month'),
+  period: getCurrentPeriod(settings.defaultRange === 'last7' ? 'day' : settings.defaultRange === 'last12' ? 'month' : (settings.defaultDimension || 'month')),
   years: defaultCompareYears(),
   channel: 'all',
   metric: 'amount'
@@ -975,14 +1157,19 @@ const recordFilterPeriodLabel = computed(() => (recordFilters.granularity === 'm
 const visibleSummary = computed(() => filterSummaryByChannel(summary, analytics.channel));
 const visibleCompareSummary = computed(() => filterSummaryByChannel(compareSummary, analytics.channel));
 const visibleTrendRows = computed(() => trendRows.value.map((item) => ({ ...item, summary: filterSummaryByChannel(item.summary, analytics.channel) })));
+const analyticsRangeLabel = computed(() => {
+  if (analytics.range === 'last7') return `截至 ${formatPeriodLabel('day', analytics.period)}的 7 天`;
+  if (analytics.range === 'last12') return `截至 ${formatPeriodLabel('month', analytics.period)}的 12 个月`;
+  return formatPeriodLabel(analytics.dimension, analytics.period);
+});
 
 const metricCards = computed(() => {
   const current = visibleSummary.value;
   return [
-    { key: 'today', label: '今日收款金额', value: money(coreSummary.today.total.amount), note: `${coreSummary.today.total.people} 人 `, className: 'card-green' },
-    { key: 'month', label: '本月收款金额', value: money(coreSummary.month.total.amount), note: `本月 ${coreSummary.month.total.people} 人`, className: 'card-blue' },
-    { key: 'year', label: '本年收款金额', value: money(coreSummary.year.total.amount), note: `本年 ${coreSummary.year.total.people} 人`, className: 'card-amber' },
-    { key: 'period', label: '当前筛选客单价', value: formatAverage(averageFromSummary(current)), note: buildDeltaNote(current.total.amount, visibleCompareSummary.value.total.amount), className: 'card-rose' }
+    { key: 'period-amount', label: '当前范围金额', value: money(current.total.amount), note: buildDeltaNote(current.total.amount, visibleCompareSummary.value.total.amount), className: 'card-green' },
+    { key: 'period-people', label: '当前范围人数', value: `${current.total.people} 人`, note: analyticsRangeLabel.value, className: 'card-blue' },
+    { key: 'period-average', label: '当前客单价', value: formatAverage(averageFromSummary(current)), note: '金额 ÷ 收款人数', className: 'card-amber' },
+    { key: 'year', label: '本年收款金额', value: money(coreSummary.year.total.amount), note: `本年 ${coreSummary.year.total.people} 人`, className: 'card-rose' }
   ];
 });
 
@@ -998,6 +1185,18 @@ const shareRows = computed(() => {
       percent: total ? Math.round((amount / total) * 100) : 0
     };
   });
+});
+const positiveShareRows = computed(() => shareRows.value.filter((item) => item.value > 0));
+const trendChartDescription = computed(() => {
+  if (visibleTrendRows.value.length === 0) return '收款趋势图，当前筛选范围暂无数据。';
+  const first = visibleTrendRows.value[0];
+  const last = visibleTrendRows.value.at(-1);
+  const total = visibleTrendRows.value.reduce((sum, item) => sum + Number(item.summary?.total?.[analytics.metric] || 0), 0);
+  return `收款趋势图，从${formatPeriodLabel(analytics.dimension, first.period)}到${formatPeriodLabel(analytics.dimension, last.period)}，${analytics.metric === 'amount' ? '合计金额' : '合计人数'}${formatChartValue(total)}。`;
+});
+const mixChartDescription = computed(() => {
+  if (positiveShareRows.value.length === 0) return '渠道占比图，当前筛选范围暂无渠道数据。';
+  return `渠道占比图，${positiveShareRows.value.map((item) => `${item.label}${item.percent}%`).join('，')}。`;
 });
 
 const filteredRecords = computed(() => {
@@ -1136,6 +1335,11 @@ function formatAverage(value) {
   return Number(value || 0) > 0 ? money(value) : '¥0.00';
 }
 
+function formatChartValue(value) {
+  const number = Number(value || 0);
+  return analytics.metric === 'amount' ? money(number) : `${number} 人`;
+}
+
 function averageFromSummary(data) {
   return data?.total?.people ? Number(data.total.amount || 0) / Number(data.total.people || 1) : 0;
 }
@@ -1226,6 +1430,15 @@ function roleScopeText(role) {
   return '录入与查看授权范围数据';
 }
 
+function isRecordSelected(id) {
+  return selectedRows.value.some((item) => item.id === id);
+}
+
+function toggleRecordSelection(item, checked) {
+  if (checked && !isRecordSelected(item.id)) selectedRows.value = [...selectedRows.value, item];
+  if (!checked) selectedRows.value = selectedRows.value.filter((row) => row.id !== item.id);
+}
+
 function saveUserProfiles() {
   writeJson(USER_PROFILE_KEY, userProfiles.value);
   addOperationLog('权限变更', '更新用户角色或启停状态');
@@ -1240,7 +1453,14 @@ function saveSettings() {
   }
   if (!settings.channels[form.channel]) form.channel = enabledChannelOptions.value[0]?.value || 'wechat';
   nextTick(renderCharts);
+  settingsSavedAt.value = new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit', hour12: false });
   addOperationLog('系统配置', '更新渠道、门店或默认统计口径');
+}
+
+function handleDefaultRangeSettingChange(nextValue) {
+  saveSettings();
+  analytics.range = nextValue;
+  handleAnalyticsRangeChange(nextValue);
 }
 
 function switchView(view) {
@@ -1276,17 +1496,47 @@ function handleFormGranularityChange(nextValue) {
 }
 
 function handleRecordGranularityChange(nextValue) {
+  recordFallbackNotice.value = '';
   recordFilters.period = nextValue === 'month' ? getCurrentPeriod('year') : getCurrentPeriod('month');
   refreshRecords();
 }
 
+function refreshRecordsFromFilter() {
+  recordFallbackNotice.value = '';
+  refreshRecords();
+}
+
 function handleAnalyticsDimensionChange(nextValue) {
+  analytics.range = 'current';
+  analyticsFallbackNotice.value = '';
   analytics.period = getCurrentPeriod(nextValue);
   if (nextValue === 'year' && analytics.years.length === 0) analytics.years = defaultCompareYears();
   refreshAnalytics();
 }
 
+function refreshAnalyticsFromFilter() {
+  analyticsFallbackNotice.value = '';
+  refreshAnalytics();
+}
+
+function handleAnalyticsRangeChange(nextValue) {
+  analyticsFallbackNotice.value = '';
+  analyticsInitialLoad.value = true;
+  if (nextValue === 'last7') {
+    analytics.dimension = 'day';
+    analytics.period = getCurrentPeriod('day');
+  } else if (nextValue === 'last12') {
+    analytics.dimension = 'month';
+    analytics.period = getCurrentPeriod('month');
+  } else {
+    analytics.dimension = settings.defaultDimension || 'month';
+    analytics.period = getCurrentPeriod(analytics.dimension);
+  }
+  refreshAnalytics();
+}
+
 function handleYearSelectionChange() {
+  analyticsFallbackNotice.value = '';
   if (analytics.years.length === 0) analytics.years = defaultCompareYears();
   analytics.period = analytics.years[analytics.years.length - 1] || getCurrentPeriod('year');
   refreshAnalytics();
@@ -1349,6 +1599,10 @@ async function login() {
     });
     currentUserId.value = user.id;
     isLoggedIn.value = true;
+    analyticsInitialLoad.value = true;
+    recordsInitialLoad.value = true;
+    analyticsFallbackNotice.value = '';
+    recordFallbackNotice.value = '';
     setActiveUserId(user.id);
     localStorage.setItem(USER_STORAGE_KEY, user.id);
     addOperationLog('登录', `用户 ${user.name} 登录系统`);
@@ -1382,6 +1636,10 @@ async function register() {
     await loadUsers();
     currentUserId.value = user.id;
     isLoggedIn.value = true;
+    analyticsInitialLoad.value = true;
+    recordsInitialLoad.value = true;
+    analyticsFallbackNotice.value = '';
+    recordFallbackNotice.value = '';
     setActiveUserId(user.id);
     localStorage.setItem(USER_STORAGE_KEY, user.id);
     userProfile(user.id).role = 'clerk';
@@ -1419,6 +1677,10 @@ function logout() {
 async function handleUserChange(userId) {
   if (!userId) return;
   currentUserId.value = userId;
+  analyticsInitialLoad.value = true;
+  recordsInitialLoad.value = true;
+  analyticsFallbackNotice.value = '';
+  recordFallbackNotice.value = '';
   setActiveUserId(currentUserId.value);
   localStorage.setItem(USER_STORAGE_KEY, currentUserId.value);
   addOperationLog('登录/切换', `切换到用户 ${users.value.find((item) => item.id === currentUserId.value)?.name || currentUserId.value}`);
@@ -1455,6 +1717,44 @@ function openUserDialog() {
   userDialogVisible.value = true;
 }
 
+function shiftPeriod(period, offset, dimension) {
+  const date = dimension === 'month'
+    ? new Date(`${period}-01T00:00:00`)
+    : new Date(`${period}T00:00:00`);
+  if (dimension === 'month') date.setMonth(date.getMonth() + offset);
+  else date.setDate(date.getDate() + offset);
+  const day = `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
+  return dimension === 'month' ? day.slice(0, 7) : day;
+}
+
+function buildPeriodSequence(endPeriod, count, dimension) {
+  return Array.from({ length: count }, (_, index) => shiftPeriod(endPeriod, index - count + 1, dimension));
+}
+
+function summarizeTrendRows(rows) {
+  const next = createSummaryState();
+  for (const row of rows) {
+    for (const channel of channelOptions.map((item) => item.value)) {
+      next[channel].amount += Number(row.summary?.[channel]?.amount || 0);
+      next[channel].people += Number(row.summary?.[channel]?.people || 0);
+    }
+  }
+  next.total.amount = channelOptions.reduce((total, item) => total + next[item.value].amount, 0);
+  next.total.people = channelOptions.reduce((total, item) => total + next[item.value].people, 0);
+  return next;
+}
+
+function completeTrendRange(sourceRows, periods) {
+  const byPeriod = new Map(sourceRows.map((item) => [item.period, item]));
+  return periods.map((period) => byPeriod.get(period) || { period, summary: createSummaryState() });
+}
+
+function latestDataPeriod(rows) {
+  return [...rows]
+    .filter((item) => Number(item.summary?.total?.amount || 0) > 0 || Number(item.summary?.total?.people || 0) > 0)
+    .sort((left, right) => String(right.period).localeCompare(String(left.period)))[0]?.period || '';
+}
+
 async function refreshAll() {
   if (!isLoggedIn.value) return;
   await Promise.all([refreshAnalytics(), refreshRecords()]);
@@ -1464,24 +1764,68 @@ async function refreshAnalytics() {
   if (!isLoggedIn.value) return;
   analyticsLoading.value = true;
   try {
-    if (analytics.dimension === 'year') {
-      const years = analytics.years.length ? analytics.years : defaultCompareYears();
-      const [trendData, ...summaryResults] = await Promise.all([
-        receiptApi.trend({ dimension: 'year' }),
-        ...years.map((year) => receiptApi.summary({ dimension: 'year', period: year }))
-      ]);
+    if (analytics.range !== 'current') {
+      const count = analytics.range === 'last7' ? 7 : 12;
+      const dimension = analytics.range === 'last7' ? 'day' : 'month';
+      const rawTrend = await receiptApi.trend({ dimension });
+      const allTrend = Array.isArray(rawTrend) ? rawTrend : [];
+      let endPeriod = getCurrentPeriod(dimension);
+      let currentRows = completeTrendRange(allTrend, buildPeriodSequence(endPeriod, count, dimension));
+      if (analyticsInitialLoad.value && summarizeTrendRows(currentRows).total.amount === 0) {
+        const latest = latestDataPeriod(allTrend);
+        if (latest) {
+          endPeriod = latest;
+          currentRows = completeTrendRange(allTrend, buildPeriodSequence(endPeriod, count, dimension));
+          analyticsFallbackNotice.value = `当前范围暂无数据，已展示截至 ${formatPeriodLabel(dimension, latest)} 的最近数据。`;
+        }
+      }
+      const previousEnd = shiftPeriod(buildPeriodSequence(endPeriod, count, dimension)[0], -1, dimension);
+      const previousRows = completeTrendRange(allTrend, buildPeriodSequence(previousEnd, count, dimension));
+      analytics.dimension = dimension;
+      analytics.period = endPeriod;
+      trendRows.value = currentRows;
+      assignSummary(summary, summarizeTrendRows(currentRows));
+      assignSummary(compareSummary, summarizeTrendRows(previousRows));
+    } else if (analytics.dimension === 'year') {
+      const rawTrend = await receiptApi.trend({ dimension: 'year' });
+      const allTrend = Array.isArray(rawTrend) ? rawTrend : [];
+      let years = analytics.years.length ? analytics.years : defaultCompareYears();
+      if (analyticsInitialLoad.value) {
+        const currentRow = allTrend.find((item) => item.period === getCurrentPeriod('year'));
+        const latest = latestDataPeriod(allTrend);
+        if (!Number(currentRow?.summary?.total?.amount || 0) && latest && latest !== getCurrentPeriod('year')) {
+          years = [String(Number(latest) - 1), latest];
+          analytics.years = years;
+          analytics.period = latest;
+          analyticsFallbackNotice.value = `本年暂无数据，已展示最近有数据的 ${latest} 年。`;
+        }
+      }
+      const summaryResults = await Promise.all(years.map((year) => receiptApi.summary({ dimension: 'year', period: year })));
       yearCompareSummaries.value = years.map((year, index) => ({ period: year, summary: summaryResults[index]?.summary || createSummaryState() }));
-      trendRows.value = Array.isArray(trendData) ? trendData : [];
-      const current = yearCompareSummaries.value.find((item) => item.period === getCurrentPeriod('year')) || yearCompareSummaries.value.at(-1);
+      trendRows.value = allTrend.filter((item) => years.includes(item.period));
+      const current = yearCompareSummaries.value.find((item) => item.period === analytics.period) || yearCompareSummaries.value.at(-1);
       const previous = yearCompareSummaries.value.find((item) => item.period === String(Number(current?.period || 0) - 1)) || yearCompareSummaries.value[0];
       assignSummary(summary, current?.summary);
       assignSummary(compareSummary, previous?.summary);
     } else {
-      const [summaryData, compareData, trendData] = await Promise.all([
+      let [summaryData, compareData, trendData] = await Promise.all([
         receiptApi.summary({ dimension: analytics.dimension, period: analytics.period }),
         receiptApi.summary({ dimension: analytics.dimension, period: comparePeriod(analytics.dimension, analytics.period) }),
         receiptApi.trend({ dimension: analytics.dimension, parentPeriod: getParentPeriod(analytics.dimension, analytics.period) || undefined })
       ]);
+      if (analyticsInitialLoad.value && Number(summaryData.summary?.total?.amount || 0) === 0) {
+        const allTrend = await receiptApi.trend({ dimension: analytics.dimension });
+        const latest = latestDataPeriod(Array.isArray(allTrend) ? allTrend : []);
+        if (latest && latest !== analytics.period) {
+          analytics.period = latest;
+          analyticsFallbackNotice.value = `当前周期暂无数据，已展示最近有数据的 ${formatPeriodLabel(analytics.dimension, latest)}。`;
+          [summaryData, compareData, trendData] = await Promise.all([
+            receiptApi.summary({ dimension: analytics.dimension, period: latest }),
+            receiptApi.summary({ dimension: analytics.dimension, period: comparePeriod(analytics.dimension, latest) }),
+            receiptApi.trend({ dimension: analytics.dimension, parentPeriod: getParentPeriod(analytics.dimension, latest) || undefined })
+          ]);
+        }
+      }
       assignSummary(summary, summaryData.summary);
       assignSummary(compareSummary, compareData.summary);
       trendRows.value = Array.isArray(trendData) ? trendData : [];
@@ -1499,6 +1843,7 @@ async function refreshAnalytics() {
   } catch (error) {
     ElMessage.error(error.message || '刷新统计失败');
   } finally {
+    analyticsInitialLoad.value = false;
     analyticsLoading.value = false;
   }
 }
@@ -1519,17 +1864,43 @@ async function refreshRecords() {
   if (!isLoggedIn.value) return;
   recordsLoading.value = true;
   try {
-    const list = await receiptApi.list({
+    let list = await receiptApi.list({
       granularity: recordFilters.granularity,
       parentPeriod: recordFilters.period || undefined,
       channel: recordFilters.channel === 'all' ? undefined : recordFilters.channel
     });
+    if (recordsInitialLoad.value && (!Array.isArray(list) || list.length === 0)) {
+      let fallbackGranularity = recordFilters.granularity;
+      let allRecords = await receiptApi.list({
+        granularity: fallbackGranularity,
+        channel: recordFilters.channel === 'all' ? undefined : recordFilters.channel
+      });
+      if ((!Array.isArray(allRecords) || allRecords.length === 0) && fallbackGranularity === 'day') {
+        fallbackGranularity = 'month';
+        allRecords = await receiptApi.list({
+          granularity: fallbackGranularity,
+          channel: recordFilters.channel === 'all' ? undefined : recordFilters.channel
+        });
+      }
+      const latest = [...(Array.isArray(allRecords) ? allRecords : [])].sort((left, right) => String(right.period).localeCompare(String(left.period)))[0];
+      if (latest) {
+        recordFilters.granularity = fallbackGranularity;
+        recordFilters.period = getParentPeriod(fallbackGranularity, latest.period);
+        list = await receiptApi.list({
+          granularity: fallbackGranularity,
+          parentPeriod: recordFilters.period,
+          channel: recordFilters.channel === 'all' ? undefined : recordFilters.channel
+        });
+        recordFallbackNotice.value = `当前周期暂无记录，已展示最近有数据的${recordFilterPeriodLabel.value}：${recordFilters.period}。`;
+      }
+    }
     records.value = Array.isArray(list) ? list : [];
     pagination.currentPage = 1;
     selectedRows.value = [];
   } catch (error) {
     ElMessage.error(error.message || '刷新台账失败');
   } finally {
+    recordsInitialLoad.value = false;
     recordsLoading.value = false;
   }
 }
@@ -1830,15 +2201,21 @@ function renderTrendChart() {
   if (!trendChart) return;
   const unit = analytics.metric === 'amount' ? '元' : '人';
   const rows = visibleTrendRows.value;
+  const singlePoint = rows.length <= 1;
+  const mobile = window.matchMedia('(max-width: 760px)').matches;
   const seriesFor = (channel) => rows.map((item) => Number(item.summary?.[channel]?.[analytics.metric] || 0));
   trendChart.setOption({
+    aria: { enabled: true, description: trendChartDescription.value },
     color: ['#0f766e', '#2563eb', '#f97316', '#7c3aed', '#111827'],
     tooltip: { trigger: 'axis', valueFormatter: (value) => `${value}${unit}` },
-    legend: { top: 0, data: [...dashboardChannelOptions.value.map((item) => item.label), '合计'] },
-    grid: { top: 48, left: 12, right: 18, bottom: 14, containLabel: true },
+    graphic: rows.length
+      ? []
+      : [{ type: 'text', left: 'center', top: 'middle', style: { text: '暂无趋势数据', fill: '#667789', fontSize: 14 } }],
+    legend: { type: 'scroll', top: 0, data: [...dashboardChannelOptions.value.map((item) => item.label), '合计'] },
+    grid: { top: 52, left: mobile ? 4 : 12, right: mobile ? 8 : 18, bottom: 14, containLabel: true },
     xAxis: {
       type: 'category',
-      boundaryGap: false,
+      boundaryGap: singlePoint,
       axisLabel: {
         formatter: (value) => {
           if (analytics.dimension === 'month') return value.slice(5);
@@ -1848,10 +2225,27 @@ function renderTrendChart() {
       },
       data: rows.map((item) => item.period)
     },
-    yAxis: { type: 'value', axisLabel: { formatter: (value) => `${value}${unit}` } },
+    yAxis: {
+      type: 'value',
+      axisLabel: { formatter: (value) => mobile && value >= 10000 ? `${Math.round(value / 1000)}k` : `${value}${unit}` }
+    },
     series: [
-      ...dashboardChannelOptions.value.map((item) => ({ name: item.label, type: 'line', smooth: true, data: seriesFor(item.value) })),
-      { name: '合计', type: 'line', smooth: true, lineStyle: { type: 'dashed', width: 3 }, data: rows.map((item) => Number(item.summary?.total?.[analytics.metric] || 0)) }
+      ...dashboardChannelOptions.value.map((item) => ({
+        name: item.label,
+        type: singlePoint ? 'bar' : 'line',
+        smooth: !singlePoint,
+        barMaxWidth: 28,
+        data: seriesFor(item.value)
+      })),
+      {
+        name: '合计',
+        type: singlePoint ? 'bar' : 'line',
+        smooth: !singlePoint,
+        barMaxWidth: 34,
+        lineStyle: { type: 'dashed', width: 3 },
+        label: { show: singlePoint, position: 'top', formatter: ({ value }) => `${value}${unit}` },
+        data: rows.map((item) => Number(item.summary?.total?.[analytics.metric] || 0))
+      }
     ]
   }, true);
   trendChart.resize();
@@ -1862,8 +2256,11 @@ function renderMixChart() {
   if (!element) return;
   mixChart = ensureChartInstance(mixChart, element);
   if (!mixChart) return;
-  const total = shareRows.value.reduce((sum, item) => sum + Number(item.value || 0), 0);
+  const chartRows = positiveShareRows.value;
+  const total = chartRows.reduce((sum, item) => sum + Number(item.value || 0), 0);
+  const mobile = window.matchMedia('(max-width: 760px)').matches;
   mixChart.setOption({
+    aria: { enabled: true, description: mixChartDescription.value },
     color: ['#0f766e', '#2563eb', '#f97316', '#7c3aed'],
     tooltip: { trigger: 'item' },
     graphic: total
@@ -1874,7 +2271,9 @@ function renderMixChart() {
           type: 'pie',
           radius: ['48%', '72%'],
           avoidLabelOverlap: true,
-          data: shareRows.value.map((item) => ({ name: item.label, value: item.value }))
+          label: { show: !mobile, formatter: '{b}\n{d}%' },
+          labelLine: { show: !mobile },
+          data: chartRows.map((item) => ({ name: item.label, value: item.value }))
         }]
       : []
   }, true);
