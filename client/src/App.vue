@@ -195,6 +195,10 @@
                 <label>统计粒度</label>
                 <el-segmented v-model="analytics.dimension" :options="analyticsGranularityOptions" @change="handleAnalyticsDimensionChange" />
               </div>
+              <div v-if="analytics.range === 'yearCompare'" class="field">
+                <label>对比维度</label>
+                <el-segmented v-model="analytics.yearCompareView" :options="yearCompareViewOptions" @change="renderCharts" />
+              </div>
               <div v-if="analytics.range === 'current' || analytics.range === 'yearCompare'" class="field">
                 <label>{{ analytics.dimension === 'year' ? '对比年份' : '统计周期' }}</label>
                 <el-date-picker
@@ -261,7 +265,7 @@
               <div class="panel-heading">
                 <div style="width: 120px">
                   <span class="eyebrow">Trend</span>
-                  <h2>收款趋势</h2>
+                  <h2>{{ trendPanelTitle }}</h2>
                 </div>
                 <el-segmented v-model="analytics.metric" :options="metricOptions" @change="renderCharts" />
               </div>
@@ -270,7 +274,7 @@
                 <summary>查看趋势明细</summary>
                 <div class="chart-data-scroll">
                   <table>
-                    <template v-if="isYearComparison">
+                    <template v-if="isMonthlyYearComparison">
                       <thead>
                         <tr>
                           <th>月份</th>
@@ -283,6 +287,24 @@
                           <td v-for="year in analytics.years" :key="`${year}-${month}`">
                             {{ formatChartValue(yearComparisonValue(year, month)) }}
                           </td>
+                        </tr>
+                      </tbody>
+                    </template>
+                    <template v-else-if="isAnnualYearComparison">
+                      <thead>
+                        <tr>
+                          <th>年份</th>
+                          <th v-for="item in dashboardChannelOptions" :key="`annual-head-${item.value}`">{{ item.label }}</th>
+                          <th>年度汇总</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        <tr v-for="row in annualComparisonRows" :key="`annual-${row.period}`">
+                          <td>{{ row.period }} 年</td>
+                          <td v-for="item in dashboardChannelOptions" :key="`${row.period}-${item.value}`">
+                            {{ formatChartValue(row.summary[item.value]?.[analytics.metric]) }}
+                          </td>
+                          <td>{{ formatChartValue(row.summary.total?.[analytics.metric]) }}</td>
                         </tr>
                       </tbody>
                     </template>
@@ -1022,6 +1044,11 @@ const analyticsRangeOptions = [
   { label: '年度对比', value: 'yearCompare' }
 ];
 
+const yearCompareViewOptions = [
+  { label: '各年月', value: 'monthly' },
+  { label: '各年汇总', value: 'annual' }
+];
+
 const entryGranularityOptions = [
   { label: '日度', value: 'day' },
   { label: '月度', value: 'month' }
@@ -1099,6 +1126,7 @@ const analytics = reactive({
           : (settings.defaultDimension || 'month')
   ),
   years: defaultCompareYears(),
+  yearCompareView: 'monthly',
   channel: 'all',
   metric: 'amount'
 });
@@ -1192,11 +1220,32 @@ const visibleSummary = computed(() => filterSummaryByChannel(summary, analytics.
 const visibleCompareSummary = computed(() => filterSummaryByChannel(compareSummary, analytics.channel));
 const visibleTrendRows = computed(() => trendRows.value.map((item) => ({ ...item, summary: filterSummaryByChannel(item.summary, analytics.channel) })));
 const isYearComparison = computed(() => analytics.dimension === 'year');
-const trendDisplayDimension = computed(() => (isYearComparison.value ? 'month' : analytics.dimension));
+const isAnnualYearComparison = computed(() => (
+  analytics.range === 'yearCompare'
+  && isYearComparison.value
+  && analytics.yearCompareView === 'annual'
+));
+const isMonthlyYearComparison = computed(() => isYearComparison.value && !isAnnualYearComparison.value);
+const annualComparisonRows = computed(() => analytics.years.map((year) => {
+  const row = yearCompareSummaries.value.find((item) => item.period === year);
+  return {
+    period: year,
+    summary: filterSummaryByChannel(row?.summary || createSummaryState(), analytics.channel)
+  };
+}));
+const trendDisplayDimension = computed(() => (
+  isAnnualYearComparison.value ? 'year' : isYearComparison.value ? 'month' : analytics.dimension
+));
+const trendPanelTitle = computed(() => {
+  if (isAnnualYearComparison.value) return '各年汇总对比';
+  if (isMonthlyYearComparison.value) return '各年月对比';
+  return '收款趋势';
+});
 const analyticsRangeLabel = computed(() => {
   if (analytics.range === 'last7') return `截至 ${formatPeriodLabel('day', analytics.period)}的 7 天`;
   if (analytics.range === 'last12') return `截至 ${formatPeriodLabel('month', analytics.period)}的 12 个月`;
-  if (isYearComparison.value) return `${analytics.years.join('、')} 年月度趋势对比`;
+  if (isAnnualYearComparison.value) return `${analytics.years.join('、')} 年度汇总对比`;
+  if (isMonthlyYearComparison.value) return `${analytics.years.join('、')} 年月度趋势对比`;
   return formatPeriodLabel(analytics.dimension, analytics.period);
 });
 
@@ -1225,8 +1274,13 @@ const shareRows = computed(() => {
 });
 const positiveShareRows = computed(() => shareRows.value.filter((item) => item.value > 0));
 const trendChartDescription = computed(() => {
+  if (isAnnualYearComparison.value) {
+    const hasData = annualComparisonRows.value.some((item) => Number(item.summary?.total?.[analytics.metric] || 0) > 0);
+    if (!hasData) return '各年汇总对比图，所选年份暂无数据。';
+    return `各年汇总对比图，对比${analytics.years.map((year) => `${year}年`).join('、')}的年度${analytics.metric === 'amount' ? '收款金额' : '收款人数'}。`;
+  }
   if (visibleTrendRows.value.length === 0) return '收款趋势图，当前筛选范围暂无数据。';
-  if (isYearComparison.value) {
+  if (isMonthlyYearComparison.value) {
     return `年度趋势对比图，对比${analytics.years.map((year) => `${year}年`).join('、')}的 1 至 12 月${analytics.metric === 'amount' ? '收款金额' : '收款人数'}。`;
   }
   const first = visibleTrendRows.value[0];
@@ -1271,7 +1325,7 @@ const logActionOptions = computed(() => [...new Set(operationLogs.value.map((ite
 
 const anomalyRows = computed(() => {
   const rows = [];
-  const trend = visibleTrendRows.value;
+  const trend = isAnnualYearComparison.value ? annualComparisonRows.value : visibleTrendRows.value;
   const latest = trend[trend.length - 1];
   const previous = trend[trend.length - 2];
   if (latest && previous && previous.summary.total.amount > 0) {
@@ -1383,6 +1437,11 @@ function formatChartValue(value) {
 function yearComparisonValue(year, month) {
   const period = `${year}-${pad(month)}`;
   const row = visibleTrendRows.value.find((item) => item.period === period);
+  return Number(row?.summary?.total?.[analytics.metric] || 0);
+}
+
+function annualComparisonValue(year) {
+  const row = annualComparisonRows.value.find((item) => item.period === year);
   return Number(row?.summary?.total?.[analytics.metric] || 0);
 }
 
@@ -2257,7 +2316,43 @@ function renderTrendChart() {
   const unit = analytics.metric === 'amount' ? '元' : '人';
   const rows = visibleTrendRows.value;
   const mobile = window.matchMedia('(max-width: 760px)').matches;
-  if (isYearComparison.value) {
+  if (isAnnualYearComparison.value) {
+    const values = analytics.years.map((year) => annualComparisonValue(year));
+    const hasYearData = values.some((value) => value > 0);
+    const seriesName = analytics.channel === 'all' ? '年度汇总' : `${channelText(analytics.channel)}汇总`;
+    trendChart.setOption({
+      aria: { enabled: true, description: trendChartDescription.value },
+      color: ['#0f766e'],
+      tooltip: { trigger: 'axis', valueFormatter: (value) => `${value}${unit}` },
+      graphic: hasYearData
+        ? []
+        : [{ type: 'text', left: 'center', top: 'middle', style: { text: '所选年份暂无汇总数据', fill: '#667789', fontSize: 14 } }],
+      legend: { top: 0, data: [seriesName] },
+      grid: { top: 52, left: mobile ? 4 : 12, right: mobile ? 8 : 18, bottom: 14, containLabel: true },
+      xAxis: {
+        type: 'category',
+        data: analytics.years.map((year) => `${year}年`)
+      },
+      yAxis: {
+        type: 'value',
+        axisLabel: { formatter: (value) => mobile && value >= 10000 ? `${Math.round(value / 1000)}k` : `${value}${unit}` }
+      },
+      series: [{
+        name: seriesName,
+        type: 'bar',
+        barMaxWidth: 56,
+        label: {
+          show: hasYearData,
+          position: 'top',
+          formatter: ({ value }) => `${value}${unit}`
+        },
+        data: values
+      }]
+    }, true);
+    trendChart.resize();
+    return;
+  }
+  if (isMonthlyYearComparison.value) {
     const months = Array.from({ length: 12 }, (_, index) => index + 1);
     const hasYearData = analytics.years.some((year) => months.some((month) => yearComparisonValue(year, month) > 0));
     trendChart.setOption({
