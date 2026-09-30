@@ -14,21 +14,8 @@
         <p>移动端快速录入，PC 端高效筛选、导出和核对，适合老板随时掌握门店现金流。</p>
       </div>
       <div class="login-preview">
-        <div class="preview-bar">
-          <span>今日</span>
-          <strong>¥8,426</strong>
-        </div>
-        <div class="preview-lines">
-          <i style="width: 76%"></i>
-          <i style="width: 58%"></i>
-          <i style="width: 88%"></i>
-          <i style="width: 42%"></i>
-        </div>
-        <div class="preview-grid">
-          <span>微信 52%</span>
-          <span>支付宝 41%</span>
-          <span>现金 7%</span>
-        </div>
+        <div class="preview-bar"><span>收款工作台</span><strong>录入 · 统计 · 核对</strong></div>
+        <p>按实际收款记录计算金额与人数，登录后查看自己的台账。</p>
       </div>
     </section>
 
@@ -76,7 +63,7 @@
       >
         {{ authMode === 'login' ? '登录' : '注册并进入' }}
       </el-button>
-      <p class="login-tip">默认管理员：账号“管理员”，密码“admin123”。</p>
+      <p class="login-tip">请使用已分配的账号登录，或注册自己的账号。</p>
     </section>
   </div>
 
@@ -208,6 +195,7 @@
                   :format="analyticsPicker.format"
                   :value-format="analyticsPicker.valueFormat"
                   :placeholder="analyticsPicker.placeholder"
+                  :clearable="false"
                   class="full-control"
                   :editable="false"
                   @change="refreshAnalyticsFromFilter"
@@ -252,6 +240,12 @@
             :title="analyticsFallbackNotice"
           />
 
+          <details class="dashboard-calculation-note">
+            <summary>统计口径与计算说明 · {{ analyticsRangeLabel }} · {{ analytics.channel === 'all' ? '全部渠道' : channelText(analytics.channel) }}</summary>
+            <p>当前范围指标、趋势、渠道分析和导出使用同一时间范围与渠道。月度及年度按同渠道同月份日数据优先汇总；已有日数据的月记录不重复计入。日度只统计原始日记录，月汇总不会虚分到每天。</p>
+            <p>录入人数为各有效记录人数之和，未去重，也不等于真实交易笔数。平均每人收款＝范围金额÷录入人数，人数为 0 时不可计算。本年卡片独立展示本年金额，并遵循当前渠道筛选。上期为紧邻当前范围之前、数量相同的日/月/年周期，具体边界见趋势说明；月/年按完整日历周期比较。</p>
+          </details>
+
           <section class="metric-grid">
             <article v-for="item in metricCards" :key="item.key" class="metric-card" :class="item.className">
               <span>{{ item.label }}</span>
@@ -263,12 +257,18 @@
           <section class="dashboard-grid">
             <article class="panel chart-panel">
               <div class="panel-heading">
-                <div style="width: 120px">
+                <div>
                   <span class="eyebrow">Trend</span>
                   <h2>{{ trendPanelTitle }}</h2>
                 </div>
                 <el-segmented v-model="analytics.metric" :options="metricOptions" @change="renderCharts" />
               </div>
+              <div class="dashboard-trend-controls">
+                <el-checkbox v-model="analytics.comparePrevious">显示同长上期</el-checkbox>
+                <el-checkbox v-model="analytics.showChannels">查看渠道曲线</el-checkbox>
+                <span>{{ comparisonNote }}</span>
+              </div>
+              <p class="chart-interaction-note">点击图中数据点可核查对应周期、渠道的原始台账；未录入周期按 0 展示。</p>
               <div ref="trendChartRef" class="chart-box" role="img" :aria-label="trendChartDescription"></div>
               <details class="chart-data-details">
                 <summary>查看趋势明细</summary>
@@ -318,7 +318,7 @@
                       </thead>
                       <tbody>
                         <tr v-for="row in visibleTrendRows" :key="`trend-${row.period}`">
-                          <td>{{ formatPeriodLabel(analytics.dimension, row.period) }}</td>
+                          <td><el-button text type="primary" @click="drillToLedger(row.period, analytics.dimension)">{{ formatPeriodLabel(analytics.dimension, row.period) }}</el-button></td>
                           <td v-for="item in dashboardChannelOptions" :key="`${row.period}-${item.value}`">
                             {{ formatChartValue(row.summary[item.value]?.[analytics.metric]) }}
                           </td>
@@ -335,14 +335,18 @@
               <div class="panel-heading">
                 <div>
                   <span class="eyebrow">Mix</span>
-                  <h2>渠道占比</h2>
+                  <h2>渠道分析</h2>
                 </div>
               </div>
               <div ref="mixChartRef" class="mix-chart" role="img" :aria-label="mixChartDescription"></div>
               <div class="mix-list">
-                <div v-for="item in positiveShareRows" :key="item.key" class="mix-row">
-                  <span>{{ item.label }}</span>
-                  <strong>{{ item.percent }}%</strong>
+                <div v-for="item in shareRows" :key="item.key" class="mix-row">
+                  <el-button text type="primary" @click="drillToLedger('', '', item.key)">{{ item.label }}</el-button>
+                  <div class="mix-row-values">
+                    <strong>{{ money(item.value) }}</strong>
+                    <span>占比 {{ item.percent }}%</span>
+                    <small>{{ item.change }}</small>
+                  </div>
                 </div>
                 <el-empty v-if="positiveShareRows.length === 0" :image-size="56" description="当前范围暂无渠道数据" />
               </div>
@@ -363,6 +367,10 @@
                   <div>
                     <strong>{{ item.title }}</strong>
                     <span>{{ item.desc }}</span>
+                    <div v-if="item.channel" class="alert-actions">
+                      <el-button size="small" @click="drillToLedger('', '', item.channel)">核查台账</el-button>
+                      <el-button v-if="item.canCreate" size="small" type="primary" @click="openAnomalyEntry(item)">补录收款</el-button>
+                    </div>
                   </div>
                 </div>
               </div>
@@ -456,7 +464,7 @@
               <strong>{{ recordTotalPeople }} 人</strong>
             </article>
             <article>
-              <span>客单价</span>
+              <span>平均每人收款</span>
               <strong>{{ formatAverage(recordAverage) }}</strong>
             </article>
           </section>
@@ -576,70 +584,13 @@
         </section>
 
         <section v-if="activeView === 'record'" class="record-page-grid">
-          <section class="panel form-panel">
-            <div class="panel-heading">
-              <div>
-                <span class="eyebrow">Entry</span>
-                <h2>{{ editingId ? '编辑收款' : '新建收款' }}</h2>
-              </div>
-              <el-tag v-if="draftSavedAt" type="info">草稿 {{ draftSavedAt }}</el-tag>
-            </div>
-            <el-form ref="formRef" :model="form" :rules="rules" label-position="top" class="entry-form">
-              <div class="form-grid">
-                <el-form-item label="统计粒度" prop="granularity">
-                  <el-segmented v-model="form.granularity" :options="entryGranularityOptions" @change="handleFormGranularityChange" />
-                </el-form-item>
-                <el-form-item label="收款渠道" prop="channel">
-                  <el-select v-model="form.channel" class="full-control">
-                    <el-option v-for="item in enabledChannelOptions" :key="item.value" :label="item.label" :value="item.value" />
-                  </el-select>
-                </el-form-item>
-                <el-form-item label="收款日期" prop="period">
-                  <el-date-picker
-                    v-model="form.period"
-                    :type="entryPicker.type"
-                    :format="entryPicker.format"
-                    :value-format="entryPicker.valueFormat"
-                    :placeholder="entryPicker.placeholder"
-                    class="full-control"
-                    :editable="false"
-                  />
-                </el-form-item>
-                <el-form-item label="收款金额" prop="amount">
-                  <el-input-number v-model="form.amount" :min="0" :precision="2" :step="100" class="full-control" />
-                </el-form-item>
-                <el-form-item label="收款人数" prop="people">
-                  <el-input-number v-model="form.people" :min="0" :precision="0" :step="1" class="full-control" />
-                </el-form-item>
-                <el-form-item label="附件状态">
-                  <el-select v-model="form.attachmentStatus" class="full-control">
-                    <el-option label="无附件" value="none" />
-                    <el-option label="已上传" value="uploaded" />
-                    <el-option label="待补充" value="pending" />
-                  </el-select>
-                </el-form-item>
-              </div>
-              <el-form-item label="备注 / 异常说明">
-                <el-input v-model="form.remark" type="textarea" :rows="4" maxlength="200" show-word-limit placeholder="可填写活动、退款、异常波动等说明" />
-              </el-form-item>
-            </el-form>
-            <div class="mobile-entry-checks">
-              <strong>录入校验</strong>
-              <ul class="check-list">
-                <li :class="{ pass: Number(form.amount) > 0 }">金额必须大于 0</li>
-                <li :class="{ pass: Number.isInteger(Number(form.people)) && Number(form.people) >= 0 }">人数不可为负</li>
-                <li :class="{ pass: isPeriodInRange(form.granularity, form.period) }">日期不可超出允许范围</li>
-                <li :class="{ pass: Boolean(form.channel) }">渠道来自启用配置</li>
-              </ul>
-            </div>
-            <div class="form-actions entry-actions">
-              <el-popconfirm title="确认清空当前填写内容吗？" @confirm="resetFormForCreate">
-                <template #reference><el-button class="clear-entry-button" text type="danger">清空内容</el-button></template>
-              </el-popconfirm>
-              <el-button class="save-entry-button" :loading="saving" @click="submitForm(false)">保存</el-button>
-              <el-button class="continue-entry-button" type="primary" :loading="saving" @click="submitForm(true)">保存并继续</el-button>
-            </div>
-          </section>
+          <ReceiptEntryForm
+            ref="formRef" :form="form" :rules="rules" :enabled-channel-options="enabledChannelOptions"
+            :entry-granularity-options="entryGranularityOptions" :entry-picker="entryPicker" :saving="saving"
+            :editing-id="editingId" :draft-saved-at="draftSavedAt" :period-valid="isPeriodInRange(form.granularity, form.period)"
+            @field-change="({ field, value }) => form[field] = value" @granularity-change="handleFormGranularityChange"
+            @save="submitForm" @clear="clearEntryForm"
+          />
 
           <aside class="panel side-helper">
             <div class="panel-heading">
@@ -757,10 +708,20 @@
             </div>
 
             <div class="form-actions">
+              <el-button :loading="importChecking" :disabled="validImportRows.length === 0" @click="refreshImportReconciliation">重新核对现有台账</el-button>
+            </div>
+            <ImportReconciliation v-if="importPlan" :plan="importPlan" />
+            <p v-if="importChecking" class="action-hint" role="status">正在核对现有台账，尚未写入任何记录。</p>
+            <p v-if="importPlan && importPlan.blocked" class="action-hint">存在日/月汇总冲突，整批暂停导入，请修正文件后重新核对。</p>
+            <el-checkbox v-if="importPlan && importPlan.needsConfirmation && !importPlan.blocked" v-model="importConfirmed" class="import-confirmation">
+              我已核对金额差额，确认替换 {{ importPlan.counts.conflict }} 行冲突数据及相关月汇总口径变化
+            </el-checkbox>
+            <p v-if="invalidImportRows.length" class="action-hint">{{ invalidImportRows.length }} 行校验异常，不会导入；文件内同日期/周期同渠道重复的所有行均须先修正。</p>
+            <div class="form-actions">
               <el-button @click="exportRecords">导出当前筛选结果</el-button>
               <el-button @click="exportDashboard">导出看板汇总报表</el-button>
-              <el-button type="primary" :disabled="validImportRows.length === 0" :loading="importing" @click="importValidRows">
-                只导入通过校验的数据
+              <el-button type="primary" :disabled="validImportRows.length === 0 || !importPlan || importPlan.blocked || importChecking || (importPlan.needsConfirmation && !importConfirmed)" :loading="importing" @click="importValidRows">
+                确认导入通过校验的数据
               </el-button>
             </div>
             <p v-if="validImportRows.length === 0" class="action-hint">上传文件并至少通过一行校验后即可导入。</p>
@@ -926,6 +887,12 @@
             </div>
             <div class="settings-form">
               <div class="field">
+                <label>预期有收款的渠道（仅这些渠道触发零收款提醒）</label>
+                <el-select v-model="settings.expectedChannels" multiple class="full-control" placeholder="不选择则不提醒零收款" @change="saveSettings">
+                  <el-option v-for="item in enabledChannelOptions" :key="item.value" :label="item.label" :value="item.value" />
+                </el-select>
+              </div>
+              <div class="field">
                 <label>默认看板粒度</label>
                 <el-select v-model="settings.defaultDimension" class="full-control" @change="saveSettings">
                   <el-option label="年" value="year" />
@@ -979,7 +946,7 @@
 import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue';
 import * as echarts from 'echarts';
 import * as XLSX from 'xlsx';
-import { ElMessage } from 'element-plus';
+import { ElMessage, ElMessageBox } from 'element-plus';
 import {
   DataAnalysis,
   Delete,
@@ -998,6 +965,10 @@ import {
   Warning
 } from '@element-plus/icons-vue';
 import { receiptApi, setActiveUserId, userApi } from './api';
+import { buildDashboardScope, dashboardChange, dashboardChannelRows, dashboardExportData, dashboardPeriodSequence, dashboardSourceRecords, emptyDashboardSummary, zeroExpectedChannels } from './utils/dashboard.js';
+import ImportReconciliation from './components/ImportReconciliation.vue';
+import ReceiptEntryForm from './components/ReceiptEntryForm.vue';
+import { createEntrySession, receiptPayload } from './utils/entry-session.js';
 
 const USER_STORAGE_KEY = 'merchant-receipt-current-user-id';
 const SETTINGS_KEY = 'merchant-receipt-settings-v2';
@@ -1020,7 +991,7 @@ const channelTagClasses = {
 };
 
 const navItems = [
-  { value: 'dashboard', label: '经营看板', shortLabel: '看板', kicker: 'Dashboard', title: '首页 / 经营看板', desc: '快速掌握当前范围的金额、人数、客单价和渠道结构。', icon: DataAnalysis },
+  { value: 'dashboard', label: '经营看板', shortLabel: '看板', kicker: 'Dashboard', title: '首页 / 经营看板', desc: '快速掌握当前范围的金额、人数、平均每人收款和渠道结构。', icon: DataAnalysis },
   { value: 'ledger', label: '收款台账', shortLabel: '台账', kicker: 'Ledger', title: '收款台账', desc: '集中筛选、修改、删除和导出所有收款记录。', icon: Tickets },
   { value: 'record', label: '新建/编辑', shortLabel: '录入', kicker: 'Entry', title: '新建 / 编辑收款', desc: '服务高频录入，支持保存并继续和草稿自动保存。', icon: Edit },
   { value: 'import', label: '导入导出', shortLabel: '导入', kicker: 'Excel', title: '批量导入导出', desc: '先预校验，再确认字段映射和渠道规则。', icon: Upload },
@@ -1097,9 +1068,12 @@ const userDialogVisible = ref(false);
 
 let trendChart = null;
 let mixChart = null;
+let analyticsRequestSequence = 0;
+let recordsRequestSequence = 0;
 
 const settings = reactive({
   channels: { wechat: true, alipay: true, cash: true, other: true },
+  expectedChannels: [],
   defaultDimension: 'month',
   defaultRange: 'current',
   importFields: '收款日期, 统计粒度, 收款渠道, 收款金额, 收款人数, 备注',
@@ -1128,10 +1102,19 @@ const analytics = reactive({
   years: defaultCompareYears(),
   yearCompareView: 'monthly',
   channel: 'all',
-  metric: 'amount'
+  metric: 'amount',
+  comparePrevious: true,
+  showChannels: false
 });
 
+const dashboardScope = ref(buildDashboardScope(analytics, []));
+const previousMonthTrendRows = ref([]);
+const analyticsSourceRecords = ref([]);
+
 const recordFilters = reactive({
+  exactPeriod: '',
+  drillDimension: '',
+  drillPeriods: [],
   granularity: 'day',
   period: getCurrentPeriod('month'),
   channel: 'all',
@@ -1139,15 +1122,13 @@ const recordFilters = reactive({
   keyword: ''
 });
 
-const form = reactive({
-  granularity: 'day',
-  channel: 'wechat',
-  period: getCurrentPeriod('day'),
-  amount: null,
-  people: null,
-  remark: '',
-  attachmentStatus: 'none'
-});
+function makeEntrySession(userId, legacyDraft = null) {
+  return createEntrySession({ storage: localStorage, userId, legacyDraft,
+    defaults: { granularity: 'day', channel: channelOptions.find((item) => settings.channels[item.value])?.value || '', period: getCurrentPeriod('day') }
+  });
+}
+let entrySession = makeEntrySession(currentUserId.value);
+const form = reactive(entrySession.restore().form);
 
 const pagination = reactive({
   currentPage: 1,
@@ -1161,6 +1142,11 @@ const coreSummary = reactive({
   month: createSummaryState(),
   year: createSummaryState()
 });
+
+const importPlan = ref(null);
+const importChecking = ref(false);
+const importConfirmed = ref(false);
+let importCheckSequence = 0;
 
 const importWizard = reactive({
   channelMode: 'file',
@@ -1219,6 +1205,16 @@ const recordFilterPeriodLabel = computed(() => (recordFilters.granularity === 'm
 const visibleSummary = computed(() => filterSummaryByChannel(summary, analytics.channel));
 const visibleCompareSummary = computed(() => filterSummaryByChannel(compareSummary, analytics.channel));
 const visibleTrendRows = computed(() => trendRows.value.map((item) => ({ ...item, summary: filterSummaryByChannel(item.summary, analytics.channel) })));
+const visiblePreviousTrendRows = computed(() => dashboardScope.value.previousRows.map((item) => ({ ...item, summary: filterSummaryByChannel(item.summary, analytics.channel) })));
+const hasComparableData = computed(() => visibleCompareSummary.value.total.amount > 0);
+const previousCoverage = computed(() => visiblePreviousTrendRows.value.filter((item) => item.summary.total.amount > 0).length);
+const comparisonPeriodLabel = computed(() => {
+  const periods = dashboardScope.value.previousPeriods;
+  const first = formatPeriodLabel(dashboardScope.value.dimension, periods[0]);
+  const last = formatPeriodLabel(dashboardScope.value.dimension, periods.at(-1));
+  return `${first}${periods.length > 1 ? ` 至 ${last}` : ''}（${periods.length} 个${granularityText(dashboardScope.value.dimension)}周期）`;
+});
+const comparisonNote = computed(() => `${hasComparableData.value ? '' : '暂无可比数据；'}上期：${comparisonPeriodLabel.value}；${previousCoverage.value}/${dashboardScope.value.previousPeriods.length} 个周期有记录，缺失周期表示未录入。`);
 const isYearComparison = computed(() => analytics.dimension === 'year');
 const isAnnualYearComparison = computed(() => (
   analytics.range === 'yearCompare'
@@ -1242,36 +1238,24 @@ const trendPanelTitle = computed(() => {
   return '收款趋势';
 });
 const analyticsRangeLabel = computed(() => {
-  if (analytics.range === 'last7') return `截至 ${formatPeriodLabel('day', analytics.period)}的 7 天`;
-  if (analytics.range === 'last12') return `截至 ${formatPeriodLabel('month', analytics.period)}的 12 个月`;
-  if (isAnnualYearComparison.value) return `${analytics.years.join('、')} 年度汇总对比`;
-  if (isMonthlyYearComparison.value) return `${analytics.years.join('、')} 年月度趋势对比`;
+  if (analytics.range === 'last7') return `截至 ${formatPeriodLabel('day', analytics.period)} 的 7 天`;
+  if (analytics.range === 'last12') return `截至 ${formatPeriodLabel('month', analytics.period)} 的 12 个月`;
+  if (isYearComparison.value) return `${analytics.years.join('、')} 年（所选年份合计）`;
   return formatPeriodLabel(analytics.dimension, analytics.period);
 });
 
 const metricCards = computed(() => {
   const current = visibleSummary.value;
+  const year = filterSummaryByChannel(coreSummary.year, analytics.channel);
   return [
-    { key: 'period-amount', label: '当前范围金额', value: money(current.total.amount), note: buildDeltaNote(current.total.amount, visibleCompareSummary.value.total.amount), className: 'card-green' },
-    { key: 'period-people', label: '当前范围人数', value: `${current.total.people} 人`, note: analyticsRangeLabel.value, className: 'card-blue' },
-    { key: 'period-average', label: '当前客单价', value: formatAverage(averageFromSummary(current)), note: '金额 ÷ 收款人数', className: 'card-amber' },
-    { key: 'year', label: '本年收款金额', value: money(coreSummary.year.total.amount), note: `本年 ${coreSummary.year.total.people} 人`, className: 'card-rose' }
+    { key: 'period-amount', label: '当前范围收款金额', value: money(current.total.amount), note: buildDeltaNote(current.total.amount, visibleCompareSummary.value.total.amount), className: 'card-green' },
+    { key: 'period-people', label: '当前范围录入人数', value: `${current.total.people} 人`, note: '录入人数求和，未去重；不等于交易笔数', className: 'card-blue' },
+    { key: 'period-average', label: '平均每人收款', value: current.total.people ? formatAverage(averageFromSummary(current)) : '暂无人数数据', note: '当前范围收款金额 ÷ 录入人数', className: 'card-amber' },
+    { key: 'year', label: `本年收款金额（${getCurrentPeriod('year')}）`, value: money(year.total.amount), note: `独立展示本年；渠道：${analytics.channel === 'all' ? '全部' : channelText(analytics.channel)}`, className: 'card-rose' }
   ];
 });
 
-const shareRows = computed(() => {
-  const data = visibleSummary.value;
-  const total = Math.max(Number(data.total.amount || 0), 0);
-  return dashboardChannelOptions.value.map((item) => {
-    const amount = Number(data[item.value]?.amount || 0);
-    return {
-      key: item.value,
-      label: item.label,
-      value: amount,
-      percent: total ? Math.round((amount / total) * 100) : 0
-    };
-  });
-});
+const shareRows = computed(() => dashboardChannelRows(visibleSummary.value, visibleCompareSummary.value, dashboardChannelOptions.value));
 const positiveShareRows = computed(() => shareRows.value.filter((item) => item.value > 0));
 const trendChartDescription = computed(() => {
   if (isAnnualYearComparison.value) {
@@ -1296,6 +1280,7 @@ const mixChartDescription = computed(() => {
 const filteredRecords = computed(() => {
   const keyword = recordFilters.keyword.trim().toLowerCase();
   return records.value
+    .filter((item) => !recordFilters.exactPeriod || recordFilters.drillDimension || item.period === recordFilters.exactPeriod)
     .filter((item) => recordFilters.entryMode === 'all' || normalizeEntryMode(item.entryMode) === recordFilters.entryMode)
     .filter((item) => !keyword || [item.remark, item.period, channelText(item.channel)].some((value) => String(value || '').toLowerCase().includes(keyword)));
 });
@@ -1307,8 +1292,9 @@ const pagedRecords = computed(() => {
 
 const recordTotalAmount = computed(() => filteredRecords.value.reduce((total, item) => total + Number(getEffectiveAmount(item) || 0), 0));
 const recordTotalPeople = computed(() => filteredRecords.value.reduce((total, item) => total + Number(getEffectivePeople(item) || 0), 0));
-const recordAverage = computed(() => (recordTotalPeople.value ? recordTotalAmount.value / recordTotalPeople.value : 0));
-const recentRecords = computed(() => [...records.value].sort((a, b) => String(b.updatedAt).localeCompare(String(a.updatedAt))).slice(0, 6));
+const recordAverage = computed(() => (recordTotalPeople.value ? recordTotalAmount.value / recordTotalPeople.value : null));
+const dashboardCurrentRecords = computed(() => dashboardScope.value.periods.flatMap((period) => dashboardSourceRecords(analyticsSourceRecords.value, dashboardScope.value.dimension, period, analytics.channel)));
+const recentRecords = computed(() => [...dashboardCurrentRecords.value].sort((a, b) => String(b.updatedAt).localeCompare(String(a.updatedAt))).slice(0, 6));
 
 const importPreview = computed(() => buildImportPreview());
 const validImportRows = computed(() => importPreview.value.filter((item) => item.errors.length === 0));
@@ -1325,30 +1311,46 @@ const logActionOptions = computed(() => [...new Set(operationLogs.value.map((ite
 
 const anomalyRows = computed(() => {
   const rows = [];
-  const trend = isAnnualYearComparison.value ? annualComparisonRows.value : visibleTrendRows.value;
-  const latest = trend[trend.length - 1];
-  const previous = trend[trend.length - 2];
-  if (latest && previous && previous.summary.total.amount > 0) {
-    const drop = (previous.summary.total.amount - latest.summary.total.amount) / previous.summary.total.amount;
-    if (drop >= 0.3) {
-      rows.push({ key: 'drop', level: 'danger', title: '金额突降', desc: `${formatPeriodLabel(trendDisplayDimension.value, latest.period)} 较上一周期下降 ${Math.round(drop * 100)}%` });
-    }
+  const current = visibleSummary.value.total.amount;
+  const previous = visibleCompareSummary.value.total.amount;
+  if (previous > 0 && (previous - current) / previous >= 0.3) {
+    rows.push({ key: 'drop', level: 'danger', title: '当前范围金额下降', desc: `${analyticsRangeLabel.value} ${buildDeltaNote(current, previous)}；请结合是否漏录核查。`, channel: analytics.channel });
   }
-  for (const item of dashboardChannelOptions.value) {
-    const value = Number(visibleSummary.value[item.value]?.amount || 0);
-    if (visibleSummary.value.total.amount > 0 && value === 0) {
-      rows.push({ key: `channel-${item.value}`, level: 'warning', title: `${item.label}渠道异常`, desc: '当前周期无收款金额，请确认是否漏录或渠道停用。' });
-    }
+  const expected = settings.expectedChannels.filter((channel) => settings.channels[channel]);
+  for (const item of zeroExpectedChannels(visibleSummary.value, expected, dashboardChannelOptions.value)) {
+    rows.push({ key: `channel-${item.value}`, level: 'warning', title: `${item.label}预期收款未录入`, desc: `${analyticsRangeLabel.value} 无收款金额；该渠道已配置为预期有收款，请核查或补录。`, channel: item.value, canCreate: true });
   }
-  if (!records.value.some((item) => item.period === getCurrentPeriod('day'))) {
-    rows.push({ key: 'missing-today', level: 'warning', title: '今日尚未录入', desc: '移动端底部按钮可快速补录今日收款。' });
-  }
-  return rows.length ? rows : [{ key: 'ok', level: 'success', title: '暂无明显异常', desc: '当前周期金额、渠道和录入节奏未发现高风险波动。' }];
+  return rows.length ? rows : [{ key: 'ok', level: 'success', title: '暂无明显异常', desc: '按当前范围、渠道及预期收款配置核查；未配置预期收款的渠道不会触发零收款提醒。' }];
 });
+
+async function drillToLedger(period = '', dimension = '', channel = analytics.channel) {
+  const scopeDimension = dimension || dashboardScope.value.dimension;
+  const periods = period ? [period] : dashboardScope.value.periods;
+  recordFilters.exactPeriod = periods.at(-1);
+  recordFilters.drillDimension = scopeDimension;
+  recordFilters.drillPeriods = [...periods];
+  recordFilters.granularity = scopeDimension === 'day' ? 'day' : 'month';
+  recordFilters.period = scopeDimension === 'day' ? periods.at(-1).slice(0, 7) : periods.at(-1).slice(0, 4);
+  recordFilters.channel = channel;
+  recordFilters.entryMode = 'all';
+  recordFilters.keyword = '';
+  recordsInitialLoad.value = false;
+  switchView('ledger');
+  await refreshRecords();
+}
+
+function openAnomalyEntry(item) {
+  openCreate();
+  const dimension = dashboardScope.value.dimension;
+  const period = dashboardScope.value.periods.at(-1);
+  form.granularity = dimension === 'day' ? 'day' : 'month';
+  form.period = dimension === 'year' ? (period === getCurrentPeriod('year') ? getCurrentPeriod('month') : `${period}-12`) : period;
+  form.channel = item.channel;
+}
 
 const rules = {
   granularity: [{ required: true, message: '请选择统计粒度', trigger: 'change' }],
-  channel: [{ required: true, message: '请选择收款渠道', trigger: 'change' }],
+  channel: [{ required: true, message: '请选择收款渠道', trigger: 'change' }, { validator: (rule, value, callback) => settings.channels[value] ? callback() : callback(new Error('该渠道已停用，请选择启用的渠道')), trigger: 'change' }],
   period: [
     { required: true, message: '请选择收款日期', trigger: 'change' },
     { validator: validatePeriodRange, trigger: 'change' }
@@ -1450,9 +1452,7 @@ function averageFromSummary(data) {
 }
 
 function buildDeltaNote(current, previous) {
-  if (!previous) return '暂无上一周期对比';
-  const delta = ((Number(current || 0) - Number(previous || 0)) / Number(previous || 1)) * 100;
-  return `${delta >= 0 ? '较上期增长' : '较上期下降'} ${Math.abs(delta).toFixed(1)}%`;
+  return dashboardChange(current, previous).text;
 }
 
 function channelText(value) {
@@ -1556,7 +1556,7 @@ function saveSettings() {
   if (importWizard.uniformChannel && !settings.channels[importWizard.uniformChannel]) {
     importWizard.uniformChannel = enabledChannelOptions.value[0]?.value || 'wechat';
   }
-  if (!settings.channels[form.channel]) form.channel = enabledChannelOptions.value[0]?.value || 'wechat';
+  // 停用渠道不悄悄替换当前录入选择；提交时提示用户主动选择。
   nextTick(renderCharts);
   settingsSavedAt.value = new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit', hour12: false });
   addOperationLog('系统配置', '更新渠道、门店或默认统计口径');
@@ -1578,35 +1578,45 @@ function switchView(view) {
 }
 
 function openCreate() {
+  if (saving.value) return;
   resetFormForCreate();
   switchView('record');
 }
 
 function resetFormForCreate() {
+  const restored = entrySession.restore();
   editingId.value = '';
-  Object.assign(form, {
-    granularity: recordFilters.granularity || 'day',
-    channel: enabledChannelOptions.value[0]?.value || 'wechat',
-    period: getCurrentPeriod(recordFilters.granularity || 'day'),
-    amount: null,
-    people: null,
-    remark: '',
-    attachmentStatus: 'none'
-  });
+  Object.assign(form, restored.form);
+  draftSavedAt.value = restored.restored ? '已恢复' : '';
+  nextTick(() => formRef.value?.clearValidate());
+}
+
+function clearEntryForm() {
+  if (saving.value) return;
+  editingId.value = '';
+  Object.assign(form, entrySession.clear());
+  draftSavedAt.value = '';
   nextTick(() => formRef.value?.clearValidate());
 }
 
 function handleFormGranularityChange(nextValue) {
-  form.period = getCurrentPeriod(nextValue);
+  form.period = entrySession.changeGranularity(nextValue, form.period);
+  nextTick(() => formRef.value?.clearValidate());
 }
 
 function handleRecordGranularityChange(nextValue) {
+  recordFilters.exactPeriod = '';
+  recordFilters.drillDimension = '';
+  recordFilters.drillPeriods = [];
   recordFallbackNotice.value = '';
   recordFilters.period = nextValue === 'month' ? getCurrentPeriod('year') : getCurrentPeriod('month');
   refreshRecords();
 }
 
 function refreshRecordsFromFilter() {
+  recordFilters.exactPeriod = '';
+  recordFilters.drillDimension = '';
+  recordFilters.drillPeriods = [];
   recordFallbackNotice.value = '';
   refreshRecords();
 }
@@ -1659,6 +1669,7 @@ function validateAmount(rule, value, callback) {
 }
 
 function validatePeople(rule, value, callback) {
+  if (value === null || value === undefined || value === '') return callback(new Error('请输入收款人数，无人次时填写 0'));
   const number = Number(value);
   if (!Number.isInteger(number) || number < 0) callback(new Error('人数不可为负'));
   else callback();
@@ -1766,6 +1777,7 @@ async function register() {
 }
 
 function logout() {
+  if (saving.value) return ElMessage.warning('收款正在保存，请稍后注销');
   addOperationLog('注销', `用户 ${users.value.find((item) => item.id === currentUserId.value)?.name || currentUserId.value} 注销系统`);
   isLoggedIn.value = false;
   currentUserId.value = '';
@@ -1785,6 +1797,7 @@ function logout() {
 }
 
 async function handleUserChange(userId) {
+  if (saving.value) return ElMessage.warning('收款正在保存，请稍后切换用户');
   if (!userId) return;
   currentUserId.value = userId;
   analyticsInitialLoad.value = true;
@@ -1827,44 +1840,6 @@ function openUserDialog() {
   userDialogVisible.value = true;
 }
 
-function shiftPeriod(period, offset, dimension) {
-  const date = dimension === 'month'
-    ? new Date(`${period}-01T00:00:00`)
-    : new Date(`${period}T00:00:00`);
-  if (dimension === 'month') date.setMonth(date.getMonth() + offset);
-  else date.setDate(date.getDate() + offset);
-  const day = `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
-  return dimension === 'month' ? day.slice(0, 7) : day;
-}
-
-function buildPeriodSequence(endPeriod, count, dimension) {
-  return Array.from({ length: count }, (_, index) => shiftPeriod(endPeriod, index - count + 1, dimension));
-}
-
-function summarizeTrendRows(rows) {
-  const next = createSummaryState();
-  for (const row of rows) {
-    for (const channel of channelOptions.map((item) => item.value)) {
-      next[channel].amount += Number(row.summary?.[channel]?.amount || 0);
-      next[channel].people += Number(row.summary?.[channel]?.people || 0);
-    }
-  }
-  next.total.amount = channelOptions.reduce((total, item) => total + next[item.value].amount, 0);
-  next.total.people = channelOptions.reduce((total, item) => total + next[item.value].people, 0);
-  return next;
-}
-
-function completeTrendRange(sourceRows, periods) {
-  const byPeriod = new Map(sourceRows.map((item) => [item.period, item]));
-  return periods.map((period) => byPeriod.get(period) || { period, summary: createSummaryState() });
-}
-
-function latestDataPeriod(rows) {
-  return [...rows]
-    .filter((item) => Number(item.summary?.total?.amount || 0) > 0 || Number(item.summary?.total?.people || 0) > 0)
-    .sort((left, right) => String(right.period).localeCompare(String(left.period)))[0]?.period || '';
-}
-
 async function refreshAll() {
   if (!isLoggedIn.value) return;
   await Promise.all([refreshAnalytics(), refreshRecords()]);
@@ -1872,193 +1847,177 @@ async function refreshAll() {
 
 async function refreshAnalytics() {
   if (!isLoggedIn.value) return;
+  const requestSequence = ++analyticsRequestSequence;
+  const userId = currentUserId.value;
+  const selection = { ...analytics, years: [...analytics.years].sort() };
+  const isCurrentRequest = () => requestSequence === analyticsRequestSequence && userId === currentUserId.value && isLoggedIn.value;
   analyticsLoading.value = true;
   try {
-    if (['last7', 'last12'].includes(analytics.range)) {
-      const count = analytics.range === 'last7' ? 7 : 12;
-      const dimension = analytics.range === 'last7' ? 'day' : 'month';
-      const rawTrend = await receiptApi.trend({ dimension });
-      const allTrend = Array.isArray(rawTrend) ? rawTrend : [];
-      let endPeriod = getCurrentPeriod(dimension);
-      let currentRows = completeTrendRange(allTrend, buildPeriodSequence(endPeriod, count, dimension));
-      if (analyticsInitialLoad.value && summarizeTrendRows(currentRows).total.amount === 0) {
-        const latest = latestDataPeriod(allTrend);
-        if (latest) {
-          endPeriod = latest;
-          currentRows = completeTrendRange(allTrend, buildPeriodSequence(endPeriod, count, dimension));
-          analyticsFallbackNotice.value = `当前范围暂无数据，已展示截至 ${formatPeriodLabel(dimension, latest)} 的最近数据。`;
-        }
-      }
-      const previousEnd = shiftPeriod(buildPeriodSequence(endPeriod, count, dimension)[0], -1, dimension);
-      const previousRows = completeTrendRange(allTrend, buildPeriodSequence(previousEnd, count, dimension));
-      analytics.dimension = dimension;
-      analytics.period = endPeriod;
-      trendRows.value = currentRows;
-      assignSummary(summary, summarizeTrendRows(currentRows));
-      assignSummary(compareSummary, summarizeTrendRows(previousRows));
-    } else if (analytics.dimension === 'year') {
-      const [rawAnnualTrend, rawMonthlyTrend] = await Promise.all([
-        receiptApi.trend({ dimension: 'year' }),
-        receiptApi.trend({ dimension: 'month' })
-      ]);
-      const annualTrend = Array.isArray(rawAnnualTrend) ? rawAnnualTrend : [];
-      const monthlyTrend = Array.isArray(rawMonthlyTrend) ? rawMonthlyTrend : [];
-      let years = analytics.years.length ? analytics.years : defaultCompareYears();
-      if (analyticsInitialLoad.value) {
-        const currentRow = annualTrend.find((item) => item.period === getCurrentPeriod('year'));
-        const latest = latestDataPeriod(annualTrend);
-        if (!Number(currentRow?.summary?.total?.amount || 0) && latest && latest !== getCurrentPeriod('year')) {
-          years = [String(Number(latest) - 1), latest];
-          analytics.years = years;
-          analytics.period = latest;
-          analyticsFallbackNotice.value = `本年暂无数据，已展示最近有数据的 ${latest} 年。`;
-        }
-      }
-      const summaryResults = await Promise.all(years.map((year) => receiptApi.summary({ dimension: 'year', period: year })));
-      yearCompareSummaries.value = years.map((year, index) => ({ period: year, summary: summaryResults[index]?.summary || createSummaryState() }));
-      trendRows.value = monthlyTrend.filter((item) => years.includes(item.period.slice(0, 4)));
-      const current = yearCompareSummaries.value.find((item) => item.period === analytics.period) || yearCompareSummaries.value.at(-1);
-      const previous = yearCompareSummaries.value.find((item) => item.period === String(Number(current?.period || 0) - 1)) || yearCompareSummaries.value[0];
-      assignSummary(summary, current?.summary);
-      assignSummary(compareSummary, previous?.summary);
-    } else {
-      let [summaryData, compareData, trendData] = await Promise.all([
-        receiptApi.summary({ dimension: analytics.dimension, period: analytics.period }),
-        receiptApi.summary({ dimension: analytics.dimension, period: comparePeriod(analytics.dimension, analytics.period) }),
-        receiptApi.trend({ dimension: analytics.dimension, parentPeriod: getParentPeriod(analytics.dimension, analytics.period) || undefined })
-      ]);
-      if (analyticsInitialLoad.value && Number(summaryData.summary?.total?.amount || 0) === 0) {
-        const allTrend = await receiptApi.trend({ dimension: analytics.dimension });
-        const latest = latestDataPeriod(Array.isArray(allTrend) ? allTrend : []);
-        if (latest && latest !== analytics.period) {
-          analytics.period = latest;
-          analyticsFallbackNotice.value = `当前周期暂无数据，已展示最近有数据的 ${formatPeriodLabel(analytics.dimension, latest)}。`;
-          [summaryData, compareData, trendData] = await Promise.all([
-            receiptApi.summary({ dimension: analytics.dimension, period: latest }),
-            receiptApi.summary({ dimension: analytics.dimension, period: comparePeriod(analytics.dimension, latest) }),
-            receiptApi.trend({ dimension: analytics.dimension, parentPeriod: getParentPeriod(analytics.dimension, latest) || undefined })
-          ]);
-        }
-      }
-      assignSummary(summary, summaryData.summary);
-      assignSummary(compareSummary, compareData.summary);
-      trendRows.value = Array.isArray(trendData) ? trendData : [];
-    }
-    const [todaySummary, monthSummary, yearSummary] = await Promise.all([
-      receiptApi.summary({ dimension: 'day', period: getCurrentPeriod('day') }),
-      receiptApi.summary({ dimension: 'month', period: getCurrentPeriod('month') }),
-      receiptApi.summary({ dimension: 'year', period: getCurrentPeriod('year') })
+    const dimension = selection.range === 'last7' ? 'day' : selection.range === 'last12' ? 'month' : selection.dimension;
+    const [sourceRows, monthlyRows, annualRows, sourceRecords] = await Promise.all([
+      receiptApi.trend({ dimension }),
+      dimension === 'year' ? receiptApi.trend({ dimension: 'month' }) : Promise.resolve([]),
+      dimension === 'year' ? Promise.resolve(null) : receiptApi.trend({ dimension: 'year' }),
+      receiptApi.list()
     ]);
-    assignSummary(coreSummary.today, todaySummary.summary);
-    assignSummary(coreSummary.month, monthSummary.summary);
-    assignSummary(coreSummary.year, yearSummary.summary);
+    if (!isCurrentRequest()) return;
+    analytics.dimension = dimension;
+    analytics.years = selection.years;
+    dashboardScope.value = buildDashboardScope(selection, sourceRows);
+    assignSummary(summary, dashboardScope.value.summary);
+    assignSummary(compareSummary, dashboardScope.value.previousSummary);
+    analyticsSourceRecords.value = sourceRecords;
+    if (dimension === 'year') {
+      yearCompareSummaries.value = dashboardScope.value.rows;
+      const byMonth = new Map(monthlyRows.map((row) => [row.period, row]));
+      const completeYears = (years) => years.flatMap((year) => dashboardPeriodSequence(`${year}-12`, 12, 'month').map((period) => ({ period, summary: byMonth.has(period) ? byMonth.get(period).summary : emptyDashboardSummary() })));
+      trendRows.value = completeYears(dashboardScope.value.periods);
+      previousMonthTrendRows.value = completeYears(dashboardScope.value.previousPeriods);
+    } else {
+      trendRows.value = dashboardScope.value.rows;
+      previousMonthTrendRows.value = [];
+      yearCompareSummaries.value = [];
+    }
+    const thisYear = (annualRows === null ? sourceRows : annualRows).find((row) => row.period === getCurrentPeriod('year'));
+    assignSummary(coreSummary.year, thisYear ? thisYear.summary : emptyDashboardSummary());
+    analyticsFallbackNotice.value = visibleSummary.value.total.amount === 0 ? '当前所选范围暂无收款记录；已保留当前时间范围和渠道筛选。' : '';
     await nextTick();
-    renderCharts();
+    if (isCurrentRequest()) renderCharts();
   } catch (error) {
-    ElMessage.error(error.message || '刷新统计失败');
+    if (isCurrentRequest()) ElMessage.error(error.message || '刷新统计失败');
   } finally {
-    analyticsInitialLoad.value = false;
-    analyticsLoading.value = false;
+    if (isCurrentRequest()) {
+      analyticsInitialLoad.value = false;
+      analyticsLoading.value = false;
+    }
   }
-}
-
-function comparePeriod(dimension, period) {
-  if (dimension === 'year') return String(Number(period) - 1);
-  const date = new Date(`${period}${dimension === 'month' ? '-01' : ''}T00:00:00`);
-  if (Number.isNaN(date.getTime())) return getCurrentPeriod(dimension);
-  if (dimension === 'month') {
-    date.setMonth(date.getMonth() - 1);
-    return `${date.getFullYear()}-${pad(date.getMonth() + 1)}`;
-  }
-  date.setDate(date.getDate() - 1);
-  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
 }
 
 async function refreshRecords() {
   if (!isLoggedIn.value) return;
+  const requestSequence = ++recordsRequestSequence;
+  const userId = currentUserId.value;
+  const filters = { ...recordFilters, drillPeriods: [...recordFilters.drillPeriods] };
+  const isCurrentRequest = () => requestSequence === recordsRequestSequence && userId === currentUserId.value && isLoggedIn.value;
   recordsLoading.value = true;
   try {
+    if (filters.exactPeriod && filters.drillDimension) {
+      const source = await receiptApi.list({ channel: filters.channel === 'all' ? undefined : filters.channel });
+      if (!isCurrentRequest()) return;
+      const scoped = filters.drillPeriods.flatMap((period) => dashboardSourceRecords(source, filters.drillDimension, period, filters.channel));
+      records.value = [...new Map(scoped.map((item) => [item.id, item])).values()].sort((a, b) => b.period.localeCompare(a.period) || b.updatedAt.localeCompare(a.updatedAt));
+      pagination.currentPage = 1;
+      selectedRows.value = [];
+      recordFallbackNotice.value = `看板定位：${filters.drillPeriods.join('、')} · ${filters.channel === 'all' ? '全部渠道' : channelText(filters.channel)}；展示原始日/月记录，同渠道同月份日数据优先。更改日期粒度、周期或渠道可退出定位。`;
+      return;
+    }
     let list = await receiptApi.list({
-      granularity: recordFilters.granularity,
-      parentPeriod: recordFilters.period || undefined,
-      channel: recordFilters.channel === 'all' ? undefined : recordFilters.channel
+      granularity: filters.granularity,
+      parentPeriod: filters.period || undefined,
+      channel: filters.channel === 'all' ? undefined : filters.channel
     });
-    if (recordsInitialLoad.value && (!Array.isArray(list) || list.length === 0)) {
-      let fallbackGranularity = recordFilters.granularity;
+    if (!isCurrentRequest()) return;
+    let fallback = null;
+    if (recordsInitialLoad.value && list.length === 0) {
+      let fallbackGranularity = filters.granularity;
       let allRecords = await receiptApi.list({
         granularity: fallbackGranularity,
-        channel: recordFilters.channel === 'all' ? undefined : recordFilters.channel
+        channel: filters.channel === 'all' ? undefined : filters.channel
       });
-      if ((!Array.isArray(allRecords) || allRecords.length === 0) && fallbackGranularity === 'day') {
+      if (!isCurrentRequest()) return;
+      if (allRecords.length === 0 && fallbackGranularity === 'day') {
         fallbackGranularity = 'month';
         allRecords = await receiptApi.list({
           granularity: fallbackGranularity,
-          channel: recordFilters.channel === 'all' ? undefined : recordFilters.channel
+          channel: filters.channel === 'all' ? undefined : filters.channel
         });
+        if (!isCurrentRequest()) return;
       }
-      const latest = [...(Array.isArray(allRecords) ? allRecords : [])].sort((left, right) => String(right.period).localeCompare(String(left.period)))[0];
+      const latest = [...allRecords].sort((left, right) => right.period.localeCompare(left.period))[0];
       if (latest) {
-        recordFilters.granularity = fallbackGranularity;
-        recordFilters.period = getParentPeriod(fallbackGranularity, latest.period);
+        const parentPeriod = getParentPeriod(fallbackGranularity, latest.period);
         list = await receiptApi.list({
           granularity: fallbackGranularity,
-          parentPeriod: recordFilters.period,
-          channel: recordFilters.channel === 'all' ? undefined : recordFilters.channel
+          parentPeriod,
+          channel: filters.channel === 'all' ? undefined : filters.channel
         });
-        recordFallbackNotice.value = `当前周期暂无记录，已展示最近有数据的${recordFilterPeriodLabel.value}：${recordFilters.period}。`;
+        if (!isCurrentRequest()) return;
+        fallback = { granularity: fallbackGranularity, period: parentPeriod };
       }
     }
-    records.value = Array.isArray(list) ? list : [];
+    if (!isCurrentRequest()) return;
+    if (fallback) {
+      recordFilters.granularity = fallback.granularity;
+      recordFilters.period = fallback.period;
+      recordFallbackNotice.value = `当前周期暂无记录，已展示最近有数据的${recordFilterPeriodLabel.value}：${fallback.period}。`;
+    }
+    records.value = list;
     pagination.currentPage = 1;
     selectedRows.value = [];
   } catch (error) {
-    ElMessage.error(error.message || '刷新台账失败');
+    if (isCurrentRequest()) ElMessage.error(error.message || '刷新台账失败');
   } finally {
-    recordsInitialLoad.value = false;
-    recordsLoading.value = false;
+    if (isCurrentRequest()) {
+      recordsInitialLoad.value = false;
+      recordsLoading.value = false;
+    }
   }
 }
 
 async function submitForm(continueAfterSave) {
-  await formRef.value.validate();
+  if (saving.value) return;
   saving.value = true;
-  const payload = {
-    channel: form.channel,
-    granularity: form.granularity,
-    period: form.period,
-    amount: Number(form.amount),
-    people: Number(form.people),
-    remark: form.remark.trim(),
-    attachmentStatus: form.attachmentStatus,
-    entryMode: 'manual'
-  };
-
+  const recordId = editingId.value;
+  const payload = receiptPayload(form);
   try {
-    if (editingId.value) {
-      await receiptApi.update(editingId.value, payload);
+    await formRef.value.validate();
+    if (recordId) {
+      await receiptApi.update(recordId, payload);
       addOperationLog('编辑收款', `${channelText(payload.channel)} ${payload.period} ${money(payload.amount)}`);
       ElMessage.success('修改成功');
     } else {
-      await receiptApi.create(payload);
-      addOperationLog('新增收款', `${channelText(payload.channel)} ${payload.period} ${money(payload.amount)}`);
-      ElMessage.success('新增成功');
+      const existing = await receiptApi.single({ granularity: payload.granularity, period: payload.period, channel: payload.channel });
+      if (existing.length > 0) {
+        const current = existing[0];
+        const total = Math.round((Number(current.amount) + payload.amount) * 100) / 100;
+        await ElMessageBox.confirm(
+          `${payload.period} · ${channelText(payload.channel)}已有汇总：${money(current.amount)} / ${current.people} 人。本次新增：${money(payload.amount)} / ${payload.people} 人。确认后累计为${money(total)} / ${Number(current.people) + payload.people} 人，仍为一条汇总记录。取消可返回修改。`,
+          '确认累计到现有汇总', { type: 'warning', confirmButtonText: '确认累计', cancelButtonText: '返回修改' }
+        );
+        await receiptApi.create({ ...payload, appendToExisting: true, existingId: current.id, expectedUpdatedAt: current.updatedAt });
+        addOperationLog('累计收款', `${channelText(payload.channel)} ${payload.period} 新增${money(payload.amount)}，累计${money(total)}`);
+        ElMessage.success('已累计到现有汇总');
+      } else {
+        await receiptApi.create(payload);
+        addOperationLog('新增收款', `${channelText(payload.channel)} ${payload.period} ${money(payload.amount)}`);
+        ElMessage.success('新增成功');
+      }
     }
-    localStorage.removeItem(DRAFT_KEY);
-    draftSavedAt.value = '';
+    if (!recordId || continueAfterSave) {
+      Object.assign(form, entrySession.saved(payload));
+      editingId.value = '';
+      draftSavedAt.value = '';
+    }
     recordFilters.granularity = payload.granularity;
     recordFilters.period = getParentPeriod(payload.granularity, payload.period);
+    recordFilters.exactPeriod = '';
+    recordFilters.drillDimension = '';
     await refreshAll();
-    if (continueAfterSave) resetFormForCreate();
+    if (continueAfterSave) nextTick(() => formRef.value?.clearValidate());
     else switchView('ledger');
   } catch (error) {
-    ElMessage.error(error.message || '保存失败');
+    // 表单校验错误已显示在字段旁；接口失败保留当前填写内容和草稿。
+    if (error instanceof Error) ElMessage.error(error.message || '保存失败');
   } finally {
     saving.value = false;
   }
 }
 
 function startEdit(item) {
+  if (saving.value) return;
+  if (!editingId.value) entrySession.saveDraft(form);
   editingId.value = item.id;
+  draftSavedAt.value = '';
   Object.assign(form, {
     granularity: item.granularity,
     channel: item.channel,
@@ -2101,7 +2060,7 @@ function recordExportPayload(sourceRows) {
     收款渠道: channelText(item.channel),
     收款金额: Number(getEffectiveAmount(item) || 0),
     收款人数: Number(getEffectivePeople(item) || 0),
-    客单价: Number(getEffectivePeople(item)) ? Number(getEffectiveAmount(item)) / Number(getEffectivePeople(item)) : 0,
+    平均每人收款: Number(getEffectivePeople(item)) ? Number(getEffectiveAmount(item)) / Number(getEffectivePeople(item)) : null,
     录入方式: entryModeText(item.entryMode),
     备注: item.remark || '',
     附件状态: attachmentText(item.attachmentStatus),
@@ -2121,17 +2080,25 @@ function exportSelected() {
 }
 
 function exportDashboard() {
-  const rows = [
-    { 指标: '当前周期金额', 值: visibleSummary.value.total.amount },
-    { 指标: '当前周期人数', 值: visibleSummary.value.total.people },
-    { 指标: '当前客单价', 值: averageFromSummary(visibleSummary.value) },
-    ...dashboardChannelOptions.value.map((item) => ({
-      指标: `${item.label}金额`,
-      值: visibleSummary.value[item.value]?.amount || 0
-    }))
-  ];
-  exportRows(rows, `经营看板_${analytics.dimension}_${Date.now()}.xlsx`, '经营看板');
-  addOperationLog('导出', '导出看板汇总报表');
+  const exportTrend = isMonthlyYearComparison.value ? visibleTrendRows.value : dashboardScope.value.rows.map((row) => ({ ...row, summary: filterSummaryByChannel(row.summary, analytics.channel) }));
+  const exportPrevious = isMonthlyYearComparison.value ? previousMonthTrendRows.value.map((row) => ({ ...row, summary: filterSummaryByChannel(row.summary, analytics.channel) })) : visiblePreviousTrendRows.value;
+  const report = dashboardExportData({
+    rangeLabel: analyticsRangeLabel.value,
+    dimensionLabel: isMonthlyYearComparison.value ? '年度合计 / 月度趋势' : granularityText(analytics.dimension),
+    channelLabel: analytics.channel === 'all' ? '全部渠道' : channelText(analytics.channel),
+    comparisonLabel: comparisonNote.value,
+    summary: visibleSummary.value,
+    previousSummary: visibleCompareSummary.value,
+    trendRows: exportTrend,
+    previousTrendRows: exportPrevious,
+    channelRows: shareRows.value
+  });
+  const workbook = XLSX.utils.book_new();
+  for (const [key, name] of [['metrics', '范围指标'], ['trend', '趋势与上期'], ['channels', '渠道分析']]) {
+    XLSX.utils.book_append_sheet(workbook, XLSX.utils.json_to_sheet(report[key]), name);
+  }
+  XLSX.writeFile(workbook, `经营看板_${analytics.dimension}_${analytics.period}_${Date.now()}.xlsx`);
+  addOperationLog('导出', `导出看板：${analyticsRangeLabel.value}，${analytics.channel === 'all' ? '全部渠道' : channelText(analytics.channel)}`);
 }
 
 function triggerImport() {
@@ -2162,8 +2129,45 @@ function validateImportRows() {
   // Computed preview recalculates automatically; this method exists for control events.
 }
 
+watch(
+  [() => importWizard.rawRows, () => importWizard.channelMode, () => importWizard.uniformChannel, currentUserId],
+  () => { refreshImportReconciliation(); },
+  { deep: true }
+);
+
+function importPayloadRows() {
+  return validImportRows.value.map((row) => ({
+    granularity: row.granularity, channel: row.channel, period: row.period,
+    amount: row.amount, people: row.people, remark: row.remark,
+    entryMode: 'import', attachmentStatus: row.attachmentStatus
+  }));
+}
+
+async function refreshImportReconciliation() {
+  const sequence = ++importCheckSequence;
+  importPlan.value = null;
+  importConfirmed.value = false;
+  const rows = importPayloadRows();
+  if (rows.length === 0 || !currentUserId.value) { importChecking.value = false; return; }
+  importChecking.value = true;
+  try {
+    const plan = await receiptApi.importRows({ rows, preview: true });
+    if (sequence !== importCheckSequence) return;
+    if (!plan || !Array.isArray(plan.rows) || typeof plan.previewToken !== 'string') {
+      console.error('导入核对接口返回不完整', plan);
+      ElMessage.error('核对结果不完整，尚未写入，请重新核对');
+      return;
+    }
+    importPlan.value = plan;
+  } catch (error) {
+    if (sequence === importCheckSequence) ElMessage.error(error.message || '核对失败，尚未写入');
+  } finally {
+    if (sequence === importCheckSequence) importChecking.value = false;
+  }
+}
+
 function buildImportPreview() {
-  const rows = importWizard.rawRows || [];
+  const rows = importWizard.rawRows;
   if (rows.length === 0) return [];
   const headers = rows[0].map(cellText);
   const index = {
@@ -2177,28 +2181,24 @@ function buildImportPreview() {
   const hasHeader = Object.values(index).some((value) => value !== -1);
   const fallback = { period: 0, granularity: 1, channel: 2, amount: 3, people: 4, remark: 5 };
   const use = Object.fromEntries(Object.entries(index).map(([key, value]) => [key, value === -1 ? fallback[key] : value]));
-  const seen = new Set();
-
-  return rows.slice(hasHeader ? 1 : 0)
-    .filter((row) => row.some((cell) => cellText(cell)))
-    .map((row, offset) => {
+  const preview = rows.slice(hasHeader ? 1 : 0)
+    .map((row, offset) => ({ row, rowNumber: offset + (hasHeader ? 2 : 1) }))
+    .filter(({ row }) => row.some((cell) => cellText(cell)))
+    .map(({ row, rowNumber }) => {
       const sourceChannel = importWizard.channelMode === 'uniform' ? importWizard.uniformChannel : normalizeChannelText(row[use.channel]);
       const granularity = normalizeGranularityText(row[use.granularity], row[use.period]);
       const period = normalizeImportPeriod(row[use.period], granularity);
       const amount = Number(row[use.amount]);
       const people = Number(row[use.people]);
-      const key = `${granularity}-${sourceChannel}-${period}`;
       const errors = [];
 
       if (!period) errors.push('非法日期');
       if (!sourceChannel) errors.push('渠道缺失');
       if (!Number.isFinite(amount) || amount <= 0) errors.push('空金额');
       if (!Number.isInteger(people) || people < 0) errors.push('人数非法');
-      if (seen.has(key)) errors.push('重复记录');
-      seen.add(key);
 
       return {
-        rowNumber: offset + (hasHeader ? 2 : 1),
+        rowNumber,
         granularity,
         channel: sourceChannel,
         period,
@@ -2210,6 +2210,15 @@ function buildImportPreview() {
         errors
       };
     });
+  const counts = new Map();
+  for (const row of preview) {
+    const key = `${row.granularity}-${row.channel}-${row.period}`;
+    counts.set(key, (counts.get(key) || 0) + 1);
+  }
+  return preview.map((row) => {
+    if (counts.get(`${row.granularity}-${row.channel}-${row.period}`) > 1) row.errors.push('文件内同日期/周期同渠道重复，请先修正');
+    return row;
+  });
 }
 
 function findHeader(headers, names) {
@@ -2247,29 +2256,43 @@ function normalizeImportPeriod(value, granularity) {
     }
   }
   const text = cellText(value).replace(/[年月]/g, '-').replace(/[日]/g, '');
-  const matched = text.match(/^(\d{4})[-/.](\d{1,2})(?:[-/.](\d{1,2}))?/);
-  if (!matched) return '';
+  const matched = text.match(/^(\d{4})[-/.](\d{1,2})(?:[-/.](\d{1,2}))?$/);
+  if (!matched || (granularity === 'day' && !matched[3])) return '';
   const month = Number(matched[2]);
   const day = Number(matched[3] || 1);
   if (month < 1 || month > 12 || day < 1 || day > 31) return '';
   const normalized = `${matched[1]}-${pad(month)}-${pad(day)}`;
+  const calendar = new Date(`${normalized}T00:00:00Z`);
+  if (Number.isNaN(calendar.getTime()) || calendar.toISOString().slice(0, 10) !== normalized) return '';
   return granularity === 'day' ? normalized : normalized.slice(0, 7);
 }
 
 async function importValidRows() {
+  const plan = importPlan.value;
+  if (!plan || plan.blocked || importChecking.value || (plan.needsConfirmation && !importConfirmed.value)) return;
+  const rows = importPayloadRows();
+  if (rows.length === 0) return;
   importing.value = true;
   try {
-    const rows = validImportRows.value.map(({ errors, rowNumber, ...row }) => row);
-    const result = await receiptApi.importRows({ rows });
-    addOperationLog('导入', `成功 ${result.created || 0} 条，更新 ${result.updated || 0} 条，失败 ${invalidImportRows.value.length} 条`);
-    ElMessage.success(`导入完成：成功 ${result.created || 0} 条，更新 ${result.updated || 0} 条，异常 ${invalidImportRows.value.length} 条`);
+    await ElMessageBox.confirm(
+      `将新增 ${plan.counts.new} 行、替换 ${plan.counts.conflict} 行、跳过 ${plan.counts.duplicate} 行完全重复数据；${invalidImportRows.value.length} 行异常不导入。原始同周期渠道金额差额合计 ${money(plan.difference)}。日/月汇总分别核对，差额合计不代表经营金额。确认本批次写入？`,
+      '确认导入与差额核对',
+      { confirmButtonText: '确认写入', cancelButtonText: '返回核对', type: plan.needsConfirmation ? 'warning' : 'info' }
+    );
+    const result = await receiptApi.importRows({ rows, previewToken: plan.previewToken, confirmed: importConfirmed.value });
+    addOperationLog('导入', `新增 ${result.created} 条，确认替换 ${result.updated} 条，重复跳过 ${result.skipped} 条，异常未导入 ${invalidImportRows.value.length} 条`);
+    ElMessage.success(`导入完成：新增 ${result.created} 条，替换 ${result.updated} 条，重复跳过 ${result.skipped} 条`);
     recordFilters.granularity = rows.some((item) => item.granularity === 'day') ? 'day' : 'month';
-    recordFilters.period = recordFilters.granularity === 'day' ? getCurrentPeriod('month') : getCurrentPeriod('year');
+    const latest = rows.filter((item) => item.granularity === recordFilters.granularity).map((item) => item.period).sort().at(-1);
+    recordFilters.period = getParentPeriod(recordFilters.granularity, latest);
     importWizard.rawRows = [];
+    importPlan.value = null;
     await refreshAll();
     switchView('ledger');
   } catch (error) {
-    ElMessage.error(error.message || '导入失败');
+    if (error === 'cancel' || error === 'close') return;
+    ElMessage.error(error.message || '导入失败，本批次未完成');
+    await refreshImportReconciliation();
   } finally {
     importing.value = false;
   }
@@ -2314,123 +2337,80 @@ function renderTrendChart() {
   trendChart = ensureChartInstance(trendChart, element);
   if (!trendChart) return;
   const unit = analytics.metric === 'amount' ? '元' : '人';
-  const rows = visibleTrendRows.value;
   const mobile = window.matchMedia('(max-width: 760px)').matches;
+  const displayComparison = analytics.comparePrevious && hasComparableData.value;
+  const rows = visibleTrendRows.value;
+  let labels;
+  let series;
   if (isAnnualYearComparison.value) {
-    const values = analytics.years.map((year) => annualComparisonValue(year));
-    const hasYearData = values.some((value) => value > 0);
-    const seriesName = analytics.channel === 'all' ? '年度汇总' : `${channelText(analytics.channel)}汇总`;
-    trendChart.setOption({
-      aria: { enabled: true, description: trendChartDescription.value },
-      color: ['#0f766e'],
-      tooltip: { trigger: 'axis', valueFormatter: (value) => `${value}${unit}` },
-      graphic: hasYearData
-        ? []
-        : [{ type: 'text', left: 'center', top: 'middle', style: { text: '所选年份暂无汇总数据', fill: '#667789', fontSize: 14 } }],
-      legend: { top: 0, data: [seriesName] },
-      grid: { top: 52, left: mobile ? 4 : 12, right: mobile ? 8 : 18, bottom: 14, containLabel: true },
-      xAxis: {
-        type: 'category',
-        data: analytics.years.map((year) => `${year}年`)
-      },
-      yAxis: {
-        type: 'value',
-        axisLabel: { formatter: (value) => mobile && value >= 10000 ? `${Math.round(value / 1000)}k` : `${value}${unit}` }
-      },
-      series: [{
-        name: seriesName,
-        type: 'bar',
-        barMaxWidth: 56,
-        label: {
-          show: hasYearData,
-          position: 'top',
-          formatter: ({ value }) => `${value}${unit}`
-        },
-        data: values
-      }]
-    }, true);
-    trendChart.resize();
-    return;
+    labels = analytics.years.map((year) => `${year}年`);
+    series = [{ name: '所选年度合计', type: 'bar', barMaxWidth: 44, data: annualComparisonRows.value.map((row) => row.summary.total[analytics.metric]) }];
+    if (displayComparison) series.push({ name: '同长上期合计', type: 'bar', barMaxWidth: 36, itemStyle: { opacity: 0.45 }, data: visiblePreviousTrendRows.value.map((row) => row.summary.total[analytics.metric]) });
+    if (analytics.showChannels) series.push(...dashboardChannelOptions.value.map((channel) => ({ name: channel.label, type: 'bar', barMaxWidth: 24, data: annualComparisonRows.value.map((row) => row.summary[channel.value][analytics.metric]) })));
+  } else if (isMonthlyYearComparison.value) {
+    labels = Array.from({ length: 12 }, (_, index) => `${index + 1}月`);
+    const years = [...analytics.years, ...(displayComparison ? dashboardScope.value.previousPeriods : [])];
+    const monthly = [...trendRows.value, ...previousMonthTrendRows.value];
+    series = years.map((year) => ({
+      name: `${year} 年`, type: 'line', smooth: false, symbolSize: 7,
+      lineStyle: { width: analytics.years.includes(year) ? 3 : 2, type: analytics.years.includes(year) ? 'solid' : 'dashed' },
+      data: Array.from({ length: 12 }, (_, index) => {
+        const row = monthly.find((item) => item.period === `${year}-${pad(index + 1)}`);
+        return filterSummaryByChannel(row.summary, analytics.channel).total[analytics.metric];
+      })
+    }));
+    if (analytics.showChannels) series.push(...analytics.years.flatMap((year) => dashboardChannelOptions.value.map((channel) => ({
+      name: `${year} 年 · ${channel.label}`, type: 'line', smooth: false, symbolSize: 4, lineStyle: { width: 1.5 },
+      data: Array.from({ length: 12 }, (_, index) => {
+        const row = monthly.find((item) => item.period === `${year}-${pad(index + 1)}`);
+        return row.summary[channel.value][analytics.metric];
+      })
+    }))));
+  } else {
+    labels = rows.map((row) => row.period);
+    const singlePoint = rows.length <= 1;
+    series = [{
+      name: '当前范围合计', type: singlePoint ? 'bar' : 'line', smooth: false, symbolSize: 8, barMaxWidth: 40,
+      lineStyle: { width: 4 }, areaStyle: singlePoint ? undefined : { opacity: 0.08 },
+      data: rows.map((row) => row.summary.total[analytics.metric])
+    }];
+    if (displayComparison) series.push({
+      name: '同长上期合计', type: singlePoint ? 'bar' : 'line', smooth: false, symbolSize: 6, barMaxWidth: 34,
+      lineStyle: { type: 'dashed', width: 2 }, itemStyle: { opacity: 0.6 },
+      data: visiblePreviousTrendRows.value.map((row) => row.summary.total[analytics.metric])
+    });
+    if (analytics.showChannels) series.push(...dashboardChannelOptions.value.map((channel) => ({
+      name: channel.label, type: singlePoint ? 'bar' : 'line', smooth: false, symbolSize: 5, barMaxWidth: 24,
+      lineStyle: { width: 1.5 }, data: rows.map((row) => row.summary[channel.value][analytics.metric])
+    })));
   }
-  if (isMonthlyYearComparison.value) {
-    const months = Array.from({ length: 12 }, (_, index) => index + 1);
-    const hasYearData = analytics.years.some((year) => months.some((month) => yearComparisonValue(year, month) > 0));
-    trendChart.setOption({
-      aria: { enabled: true, description: trendChartDescription.value },
-      color: ['#0f766e', '#2563eb', '#d97706', '#be3455', '#7c3aed', '#0891b2'],
-      tooltip: { trigger: 'axis', valueFormatter: (value) => `${value}${unit}` },
-      graphic: hasYearData
-        ? []
-        : [{ type: 'text', left: 'center', top: 'middle', style: { text: '所选年份暂无月度数据', fill: '#667789', fontSize: 14 } }],
-      legend: { type: 'scroll', top: 0, data: analytics.years.map((year) => `${year} 年`) },
-      grid: { top: 52, left: mobile ? 4 : 12, right: mobile ? 8 : 18, bottom: 14, containLabel: true },
-      xAxis: {
-        type: 'category',
-        boundaryGap: false,
-        data: months.map((month) => `${month}月`)
-      },
-      yAxis: {
-        type: 'value',
-        axisLabel: { formatter: (value) => mobile && value >= 10000 ? `${Math.round(value / 1000)}k` : `${value}${unit}` }
-      },
-      series: analytics.years.map((year) => ({
-        name: `${year} 年`,
-        type: 'line',
-        smooth: true,
-        symbolSize: 7,
-        connectNulls: false,
-        data: months.map((month) => yearComparisonValue(year, month))
-      }))
-    }, true);
-    trendChart.resize();
-    return;
-  }
-  const singlePoint = rows.length <= 1;
-  const seriesFor = (channel) => rows.map((item) => Number(item.summary?.[channel]?.[analytics.metric] || 0));
   trendChart.setOption({
     aria: { enabled: true, description: trendChartDescription.value },
-    color: ['#0f766e', '#2563eb', '#f97316', '#7c3aed', '#111827'],
+    color: ['#0f766e', '#94a3b8', '#2563eb', '#f97316', '#7c3aed', '#be3455', '#0891b2'],
     tooltip: { trigger: 'axis', valueFormatter: (value) => `${value}${unit}` },
-    graphic: rows.length
-      ? []
-      : [{ type: 'text', left: 'center', top: 'middle', style: { text: '暂无趋势数据', fill: '#667789', fontSize: 14 } }],
-    legend: { type: 'scroll', top: 0, data: [...dashboardChannelOptions.value.map((item) => item.label), '合计'] },
+    legend: { type: 'scroll', top: 0, data: series.map((item) => item.name) },
     grid: { top: 52, left: mobile ? 4 : 12, right: mobile ? 8 : 18, bottom: 14, containLabel: true },
-    xAxis: {
-      type: 'category',
-      boundaryGap: singlePoint,
-      axisLabel: {
-        formatter: (value) => {
-          if (analytics.dimension === 'month') return value.slice(5);
-          if (analytics.dimension === 'day') return value.slice(8);
-          return value;
-        }
-      },
-      data: rows.map((item) => item.period)
-    },
-    yAxis: {
-      type: 'value',
-      axisLabel: { formatter: (value) => mobile && value >= 10000 ? `${Math.round(value / 1000)}k` : `${value}${unit}` }
-    },
-    series: [
-      ...dashboardChannelOptions.value.map((item) => ({
-        name: item.label,
-        type: singlePoint ? 'bar' : 'line',
-        smooth: !singlePoint,
-        barMaxWidth: 28,
-        data: seriesFor(item.value)
-      })),
-      {
-        name: '合计',
-        type: singlePoint ? 'bar' : 'line',
-        smooth: !singlePoint,
-        barMaxWidth: 34,
-        lineStyle: { type: 'dashed', width: 3 },
-        label: { show: singlePoint, position: 'top', formatter: ({ value }) => `${value}${unit}` },
-        data: rows.map((item) => Number(item.summary?.total?.[analytics.metric] || 0))
-      }
-    ]
+    xAxis: { type: 'category', boundaryGap: rows.length <= 1 || isAnnualYearComparison.value, data: labels,
+      axisLabel: { formatter: (value) => /^\d{4}-/.test(value) ? value.slice(5) : value } },
+    yAxis: { type: 'value', axisLabel: { formatter: (value) => mobile && value >= 10000 ? `${Math.round(value / 1000)}k` : `${value}${unit}` } },
+    series
   }, true);
+  trendChart.off('click');
+  trendChart.on('click', (params) => {
+    if (params.componentType !== 'series') return;
+    if (isAnnualYearComparison.value) {
+      const period = params.seriesName === '同长上期合计' ? dashboardScope.value.previousPeriods[params.dataIndex] : analytics.years[params.dataIndex];
+      const channel = channelOptions.find((item) => item.label === params.seriesName);
+      drillToLedger(period, 'year', channel ? channel.value : analytics.channel);
+    } else if (isMonthlyYearComparison.value) {
+      const channel = channelOptions.find((item) => params.seriesName.endsWith(` · ${item.label}`));
+      drillToLedger(`${params.seriesName.slice(0, 4)}-${pad(params.dataIndex + 1)}`, 'month', channel ? channel.value : analytics.channel);
+    } else {
+      const period = params.seriesName === '同长上期合计' ? visiblePreviousTrendRows.value[params.dataIndex].period : rows[params.dataIndex].period;
+      const channel = channelOptions.find((item) => item.label === params.seriesName);
+      drillToLedger(period, analytics.dimension, channel ? channel.value : analytics.channel);
+    }
+  });
   trendChart.resize();
 }
 
@@ -2469,14 +2449,21 @@ function resizeCharts() {
 }
 
 watch(
+  () => currentUserId.value,
+  (userId) => {
+    entrySession = makeEntrySession(userId);
+    resetFormForCreate();
+  }
+);
+
+watch(
   () => [form.granularity, form.channel, form.period, form.amount, form.people, form.remark, form.attachmentStatus],
   () => {
-    if (!editingId.value) {
-      writeJson(DRAFT_KEY, form);
-      draftSavedAt.value = new Date().toLocaleTimeString('zh-CN', { hour12: false });
+    if (isLoggedIn.value && !editingId.value) {
+      const saved = entrySession.saveDraft(form);
+      draftSavedAt.value = saved ? new Date().toLocaleTimeString('zh-CN', { hour12: false }) : '';
     }
-  },
-  { deep: true }
+  }
 );
 
 watch(
@@ -2488,17 +2475,17 @@ watch(
 );
 
 watch(
-  () => [analytics.channel, analytics.metric],
+  () => [analytics.channel, analytics.metric, analytics.comparePrevious, analytics.showChannels],
   () => renderCharts()
 );
 
 onMounted(async () => {
   const hashView = window.location.hash.replace('#', '');
   if (navItems.some((item) => item.value === hashView)) activeView.value = hashView;
-  const savedDraft = readJson(DRAFT_KEY, null);
-  if (savedDraft) {
-    Object.assign(form, savedDraft);
-    draftSavedAt.value = '已恢复';
+  if (savedUserId) {
+    entrySession = makeEntrySession(savedUserId, readJson(DRAFT_KEY, null));
+    localStorage.removeItem(DRAFT_KEY);
+    resetFormForCreate();
   }
   await loadUsers();
   if (isLoggedIn.value) {

@@ -1,6 +1,7 @@
 import express from 'express';
 import { nanoid } from 'nanoid';
-import { readReceipts, readUsers, writeReceipts } from '../storage.js';
+import { readReceipts, readUsers, writeReceipts, withReceiptMutation } from '../storage.js';
+import { appendToReceipt, applyImportPlan, buildImportPlan, importPreviewToken } from '../../../shared/import-reconciliation.js';
 
 const router = express.Router();
 
@@ -473,26 +474,35 @@ router.get('/trend', async (req, res, next) => {
 
 router.post('/', async (req, res, next) => {
   try {
+    await withReceiptMutation(async () => {
     const userId = getCurrentUserId(req);
     const { errors, value } = validateEntryPayload(req.body);
     if (errors.length) return fail(res, 400, errors.join('；'));
 
     const allReceipts = await getSourceReceipts();
     const receipts = allReceipts.filter((item) => item.userId === userId);
-    const duplicated = receipts.find(
-      (item) =>
-        item.channel === value.channel &&
-        item.granularity === value.granularity &&
-        item.period === value.period
-    );
-    if (duplicated) return fail(res, 409, '相同渠道与周期的数据已存在，请直接编辑');
-
     if (
       value.granularity === 'month' &&
       hasDayDataForMonth(receipts, value.channel, value.period)
     ) {
       return fail(res, 409, '该月已有日数据，月统计将自动汇总日数据，不支持再录入月数据');
     }
+
+    const duplicated = receipts.find(
+      (item) =>
+        item.channel === value.channel &&
+        item.granularity === value.granularity &&
+        item.period === value.period
+    );
+    if (duplicated) {
+      const appended = appendToReceipt(duplicated, value, req.body);
+      if (appended.error) return fail(res, 409, appended.error);
+      const nextReceipts = receipts.map((item) => item.id === duplicated.id ? appended.value : item);
+      await writeReceipts(mergeUserReceipts(allReceipts, userId, nextReceipts));
+      return ok(res, appended.value, '已确认累计收款');
+    }
+
+    if (req.body.appendToExisting === true) return fail(res, 409, '原记录已删除或日期渠道已变化，请重新核对');
 
     const now = new Date().toISOString();
     const receipt = {
@@ -506,6 +516,7 @@ router.post('/', async (req, res, next) => {
     receipts.push(receipt);
     await writeReceipts(mergeUserReceipts(allReceipts, userId, receipts));
     ok(res, receipt, '新增成功');
+    });
   } catch (error) {
     next(error);
   }
@@ -513,50 +524,22 @@ router.post('/', async (req, res, next) => {
 
 router.post('/import', async (req, res, next) => {
   try {
-    const userId = getCurrentUserId(req);
-    const { errors, values } = validateImportPayload(req.body);
-    if (errors.length) return fail(res, 400, errors.join('；'));
-
-    const allReceipts = await getSourceReceipts();
-    const receipts = allReceipts.filter((item) => item.userId === userId);
-    const blocked = values.filter((item) => item.granularity === 'month' && hasDayDataForMonth(receipts, item.channel, item.period));
-    if (blocked.length) {
-      return fail(res, 409, `以下月份已有日数据，不能导入月数据：${blocked.map((item) => item.period).join('、')}`);
-    }
-
-    const now = new Date().toISOString();
-    let created = 0;
-    let updated = 0;
-
-    for (const value of values) {
-      const index = receipts.findIndex(
-        (item) =>
-          item.channel === value.channel &&
-          item.granularity === value.granularity &&
-          item.period === value.period
-      );
-
-      if (index === -1) {
-        receipts.push({
-          id: nanoid(10),
-          userId,
-          ...value,
-          createdAt: now,
-          updatedAt: now
-        });
-        created += 1;
-      } else {
-        receipts[index] = {
-          ...receipts[index],
-          ...value,
-          updatedAt: now
-        };
-        updated += 1;
-      }
-    }
-
-    await writeReceipts(mergeUserReceipts(allReceipts, userId, receipts));
-    ok(res, { created, updated, total: values.length }, '导入成功');
+    await withReceiptMutation(async () => {
+      const userId = getCurrentUserId(req);
+      const { errors, values } = validateImportPayload(req.body);
+      if (errors.length) return fail(res, 400, errors.join('；'));
+      const allReceipts = await getSourceReceipts();
+      const receipts = allReceipts.filter((item) => item.userId === userId);
+      const plan = buildImportPlan(values, receipts);
+      const previewToken = await importPreviewToken(userId, values, receipts);
+      if (req.body.preview === true) return ok(res, { ...plan, previewToken }, '核对完成，尚未写入');
+      if (plan.blocked) return fail(res, 409, '存在文件重复或日/月汇总冲突，请先修正文件并重新核对');
+      if (req.body.previewToken !== previewToken) return fail(res, 409, '台账或导入内容已变化，请重新核对后再确认');
+      if (plan.needsConfirmation && req.body.confirmed !== true) return fail(res, 409, '存在同周期同渠道冲突或月汇总口径变化，请明确确认后再导入');
+      const nextReceipts = applyImportPlan(values, receipts, plan, userId, () => nanoid(10), new Date().toISOString());
+      if (plan.counts.new + plan.counts.conflict > 0) await writeReceipts(mergeUserReceipts(allReceipts, userId, nextReceipts));
+      ok(res, { created: plan.counts.new, updated: plan.counts.conflict, skipped: plan.counts.duplicate, total: values.length }, '导入成功');
+    });
   } catch (error) {
     next(error);
   }
@@ -564,6 +547,7 @@ router.post('/import', async (req, res, next) => {
 
 router.put('/:id', async (req, res, next) => {
   try {
+    await withReceiptMutation(async () => {
     const userId = getCurrentUserId(req);
     const { errors, value } = validateEntryPayload(req.body);
     if (errors.length) return fail(res, 400, errors.join('；'));
@@ -597,6 +581,7 @@ router.put('/:id', async (req, res, next) => {
 
     await writeReceipts(mergeUserReceipts(allReceipts, userId, receipts));
     ok(res, receipts[index], '修改成功');
+    });
   } catch (error) {
     next(error);
   }
@@ -604,6 +589,7 @@ router.put('/:id', async (req, res, next) => {
 
 router.delete('/:id', async (req, res, next) => {
   try {
+    await withReceiptMutation(async () => {
     const userId = getCurrentUserId(req);
     const allReceipts = await getSourceReceipts();
     const receipts = allReceipts.filter((item) => item.userId === userId);
@@ -612,6 +598,7 @@ router.delete('/:id', async (req, res, next) => {
 
     await writeReceipts(mergeUserReceipts(allReceipts, userId, nextReceipts));
     ok(res, { id: req.params.id }, '删除成功');
+    });
   } catch (error) {
     next(error);
   }

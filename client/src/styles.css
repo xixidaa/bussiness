@@ -1174,8 +1174,7 @@ input {
     text-overflow: ellipsis;
   }
 
-  .brand-block small,
-  .topbar-actions {
+  .brand-block small {
     display: none;
   }
 
@@ -1459,5 +1458,225 @@ input {
 @media (max-width: 360px) {
   .side-nav > .brand-block .brand-mark {
     display: none;
+  }
+}
+
+/* 保持手机端操作与电脑端一致，统计说明和核查入口允许换行。 */
+.field,
+.dashboard-trend-controls,
+.alert-item > div {
+  min-width: 0;
+}
+
+.dashboard-trend-controls {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px 16px;
+  margin-bottom: 12px;
+}
+
+.dashboard-calculation-note {
+  margin: 0;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.7;
+  overflow-wrap: anywhere;
+}
+
+.alert-actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.alert-actions .el-button + .el-button {
+  margin-left: 0;
+}
+
+.mix-row {
+  flex-wrap: wrap;
+}
+
+.mix-row > div {
+  min-width: 0;
+}
+
+@media (max-width: 760px) {
+  .topbar {
+    flex-wrap: wrap;
+  }
+
+  .topbar-actions {
+    display: flex;
+    width: 100%;
+  }
+
+  .topbar-actions .el-button {
+    flex: 1;
+    margin-left: 0;
+  }
+
+  .dashboard-trend-controls {
+    align-items: flex-start;
+    gap: 8px;
+  }
+
+  .dashboard-trend-controls .el-select {
+    width: 100%;
+  }
+
+  .dashboard-trend-controls .el-checkbox-group {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0 12px;
+  }
+
+  .dashboard-trend-controls .el-checkbox {
+    margin-right: 0;
+    white-space: normal;
+  }
+
+  .setting-row {
+    flex-wrap: wrap;
+  }
+
+  .setting-row > div {
+    min-width: 0;
+  }
+
+  .pagination-wrap {
+    justify-content: center;
+  }
+
+  .pagination-wrap .el-pagination {
+    flex-wrap: wrap;
+    justify-content: center;
+    gap: 8px;
+  }
+
+  .el-picker-panel.el-date-range-picker {
+    width: min(646px, calc(100vw - 24px));
+  }
+
+  .el-date-range-picker .el-picker-panel__body {
+    min-width: 0;
+  }
+
+  .el-date-range-picker__content {
+    width: 100%;
+    border-right: 0;
+  }
+
+  .el-date-range-picker__content.is-right {
+    border-top: 1px solid var(--line);
+  }
+
+  .el-date-range-picker__time-header {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+  }
+
+  .el-message-box {
+    max-width: calc(100vw - 24px);
+  }
+
+  .range-readout {
+    min-height: 44px;
+    height: auto;
+    white-space: normal;
+    overflow-wrap: anywhere;
+  }
+
+  .alert-actions .el-button {
+    min-height: 44px;
+  }
+}
+.mix-row-values {
+  display: grid;
+  gap: 4px;
+  text-align: right;
+}
+
+.mix-row-values strong {
+  font-variant-numeric: tabular-nums;
+  overflow-wrap: anywhere;
+}
+
+.mix-row-values small {
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.dashboard-calculation-note summary {
+  min-height: 36px;
+  display: inline-flex;
+  align-items: center;
+  color: var(--blue);
+  cursor: pointer;
+}
+
+.dashboard-calculation-note p {
+  margin: 8px 0;
+}
+
+@media (max-width: 760px) {
+  .dashboard-calculation-note summary {
+    min-height: 44px;
+  }
+
+  .dashboard-trend-controls .el-checkbox {
+    height: auto;
+    min-height: 44px;
+  }
+
+  .dashboard-trend-controls > span {
+    width: 100%;
+    font-size: 13px;
+    color: var(--muted);
+    line-height: 1.5;
+  }
+}
+.chart-interaction-note {
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+.import-confirmation {
+  max-width: 100%;
+  height: auto;
+  align-items: flex-start;
+  padding: 10px 0;
+}
+
+.import-confirmation .el-checkbox__input {
+  margin-top: 3px;
+}
+
+.import-confirmation .el-checkbox__label {
+  min-width: 0;
+  white-space: normal;
+  line-height: 1.6;
+  overflow-wrap: anywhere;
+}
+@media (max-width: 760px) {
+  /* 顶栏已提供新建入口，避免悬浮按钮遮住统计和台账内容。 */
+  .mobile-fab {
+    display: none;
+  }
+}
+.chart-panel .panel-heading .el-segmented {
+  flex: 0 0 180px;
+  width: 180px;
+}
+
+@media (max-width: 760px) {
+  .chart-panel .panel-heading .el-segmented {
+    width: 100%;
   }
 }

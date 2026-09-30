@@ -55,8 +55,7 @@ router.post('/login', async (req, res, next) => {
     if (!user) return fail(res, 401, '账号或密码不正确');
 
     const expected = hashPassword(password, user.passwordSalt || '').passwordHash;
-    const defaultAdminLogin = user.id === 'admin' && password === 'admin123';
-    if ((!user.passwordHash || expected !== user.passwordHash) && !defaultAdminLogin) {
+    if (!user.passwordHash || expected !== user.passwordHash) {
       return fail(res, 401, '账号或密码不正确');
     }
 

@@ -1,4 +1,4 @@
-import { seedReceipts } from '../../server/src/seed-data.js';
+import { appendToReceipt, applyImportPlan, buildImportPlan, importPreviewToken } from '../../shared/import-reconciliation.js';
 
 const DEFAULT_USER = {
   id: 'admin',
@@ -31,7 +31,7 @@ const INDEX_SQL = [
   'CREATE INDEX IF NOT EXISTS idx_receipts_channel_period ON receipts (channel, period)'
 ];
 
-let initPromise;
+const databaseInitializations = new WeakMap();
 
 function json(data = null, message = 'success', code = 0, status = 200) {
   return Response.json({ code, message, data }, { status });
@@ -53,6 +53,7 @@ export async function withErrorHandling(task) {
   try {
     return await task();
   } catch (error) {
+    if (String(error.message).includes('CHECK constraint failed')) return fail(409, '台账已变化，本批次未写入，请重新核对后再确认');
     return fail(500, error?.message || 'Internal server error');
   }
 }
@@ -464,64 +465,30 @@ async function migrateReceiptsTable(db) {
 async function ensureDefaultUser(db) {
   const now = new Date().toISOString();
   const password = await hashPassword(DEFAULT_PASSWORD, DEFAULT_PASSWORD_SALT);
-  await db
-    .prepare(
-      `INSERT INTO users (id, name, role, passwordHash, passwordSalt, createdAt, updatedAt)
-       VALUES (?, ?, ?, ?, ?, ?, ?)
-       ON CONFLICT(id) DO UPDATE SET
-         name = excluded.name,
-         role = excluded.role,
-         passwordHash = excluded.passwordHash,
-         passwordSalt = excluded.passwordSalt,
-         updatedAt = excluded.updatedAt`
-    )
-    .bind(DEFAULT_USER.id, DEFAULT_USER.name, DEFAULT_USER.role, password.passwordHash, password.passwordSalt, now, now)
-    .run();
-}
-
-async function seedIfNeeded(db) {
-  const { results } = await db.prepare('SELECT COUNT(*) AS count FROM receipts').run();
-  const count = Number(results?.[0]?.count || 0);
-  if (count > 0) return;
-
-  const statements = seedReceipts.map((item) =>
-    db
-      .prepare(
-        `INSERT OR IGNORE INTO receipts
-          (id, userId, channel, granularity, period, date, amount, people, entryMode, remark, attachmentStatus, createdAt, updatedAt)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
-      )
-      .bind(
-        item.id,
-        item.userId || DEFAULT_USER.id,
-        item.channel,
-        item.granularity,
-        item.period,
-        item.date,
-        item.amount,
-        item.people,
-        normalizeEntryMode(item.entryMode),
-        item.remark || '',
-        normalizeAttachmentStatus(item.attachmentStatus),
-        item.createdAt,
-        item.updatedAt
-      )
-  );
-
-  if (statements.length > 0) {
-    await db.batch(statements);
-  }
+  await db.prepare(
+    `INSERT OR IGNORE INTO users (id, name, role, passwordHash, passwordSalt, createdAt, updatedAt)
+     VALUES (?, ?, ?, ?, ?, ?, ?)`
+  ).bind(DEFAULT_USER.id, DEFAULT_USER.name, DEFAULT_USER.role, password.passwordHash, password.passwordSalt, now, now).run();
 }
 
 export async function ensureDatabase(db) {
-  if (!initPromise) {
-    initPromise = (async () => {
+  if (!databaseInitializations.has(db)) {
+    databaseInitializations.set(db, (async () => {
       await ensureSchema(db);
-      await seedIfNeeded(db);
-    })();
+      await db.prepare('CREATE TABLE IF NOT EXISTS receipt_revision (id INTEGER PRIMARY KEY CHECK (id = 1), revision INTEGER NOT NULL)').run();
+      await db.prepare('INSERT OR IGNORE INTO receipt_revision (id, revision) VALUES (1, 0)').run();
+      await db.prepare('CREATE TABLE IF NOT EXISTS receipt_write_guards (id TEXT PRIMARY KEY, valid INTEGER NOT NULL CHECK (valid = 1))').run();
+      for (const operation of ['INSERT', 'UPDATE', 'DELETE']) {
+        await db.prepare(`CREATE TRIGGER IF NOT EXISTS receipt_revision_${operation.toLowerCase()} AFTER ${operation} ON receipts BEGIN UPDATE receipt_revision SET revision = revision + 1 WHERE id = 1; END`).run();
+      }
+    })());
   }
+  await databaseInitializations.get(db);
+}
 
-  await initPromise;
+async function receiptRevision(db) {
+  const { results } = await db.prepare('SELECT revision FROM receipt_revision WHERE id = 1').run();
+  return Number(results[0].revision);
 }
 
 async function readReceipts(db) {
@@ -537,34 +504,19 @@ async function readReceipts(db) {
     : [];
 }
 
-async function writeReceipts(db, receipts) {
-  await db.exec('DELETE FROM receipts');
-  if (receipts.length === 0) return;
-
-  const statements = receipts.map((item) =>
-    db
-      .prepare(
-        `INSERT INTO receipts
-          (id, userId, channel, granularity, period, date, amount, people, entryMode, remark, attachmentStatus, createdAt, updatedAt)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
-      )
-      .bind(
-        item.id,
-        item.userId || DEFAULT_USER.id,
-        item.channel,
-        item.granularity,
-        item.period,
-        item.date,
-        item.amount,
-        item.people,
-        normalizeEntryMode(item.entryMode),
-        item.remark || '',
-        normalizeAttachmentStatus(item.attachmentStatus),
-        item.createdAt,
-        item.updatedAt
-      )
-  );
-
+async function writeReceipts(db, receipts, expectedRevision) {
+  const guardId = crypto.randomUUID();
+  const statements = [
+    db.prepare('INSERT INTO receipt_write_guards (id, valid) SELECT ?, CASE WHEN revision = ? THEN 1 ELSE 0 END FROM receipt_revision WHERE id = 1').bind(guardId, expectedRevision),
+    db.prepare('DELETE FROM receipts'),
+    ...receipts.map((item) => db.prepare(
+      `INSERT INTO receipts
+        (id, userId, channel, granularity, period, date, amount, people, entryMode, remark, attachmentStatus, createdAt, updatedAt)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    ).bind(item.id, item.userId || DEFAULT_USER.id, item.channel, item.granularity, item.period, item.date, item.amount, item.people, normalizeEntryMode(item.entryMode), item.remark || '', normalizeAttachmentStatus(item.attachmentStatus), item.createdAt, item.updatedAt)),
+    db.prepare('DELETE FROM receipt_write_guards WHERE id = ?').bind(guardId)
+  ];
+  // D1 batch 在一个事务中执行；快照过期或任何一行失败均整体回滚。
   await db.batch(statements);
 }
 
@@ -642,8 +594,7 @@ export async function handleUsersLogin(db, request) {
   if (!user) return fail(401, '账号或密码不正确');
 
   const expected = await hashPassword(password, user.passwordSalt || '');
-  const defaultAdminLogin = user.id === DEFAULT_USER.id && password === DEFAULT_PASSWORD;
-  if ((!user.passwordHash || expected.passwordHash !== user.passwordHash) && !defaultAdminLogin) {
+  if (!user.passwordHash || expected.passwordHash !== user.passwordHash) {
     return fail(401, '账号或密码不正确');
   }
 
@@ -777,19 +728,28 @@ export async function handleCreate(db, request) {
   const { errors, value } = validateEntryPayload(body || {});
   if (errors.length) return fail(400, errors.join('；'));
 
+  const expectedRevision = await receiptRevision(db);
   const allReceipts = await readReceipts(db);
   const receipts = userReceipts(allReceipts, userId);
+  if (value.granularity === 'month' && hasDayDataForMonth(receipts, value.channel, value.period)) {
+    return fail(409, '该月已有日数据，月统计将自动汇总日数据，不支持再录入月数据');
+  }
+
   const duplicated = receipts.find(
     (item) =>
       item.channel === value.channel &&
       item.granularity === value.granularity &&
       item.period === value.period
   );
-  if (duplicated) return fail(409, '相同渠道与周期的数据已存在，请直接编辑');
-
-  if (value.granularity === 'month' && hasDayDataForMonth(receipts, value.channel, value.period)) {
-    return fail(409, '该月已有日数据，月统计将自动汇总日数据，不支持再录入月数据');
+  if (duplicated) {
+    const appended = appendToReceipt(duplicated, value, body);
+    if (appended.error) return fail(409, appended.error);
+    const nextReceipts = receipts.map((item) => item.id === duplicated.id ? appended.value : item);
+    await writeReceipts(db, mergeUserReceipts(allReceipts, userId, nextReceipts), expectedRevision);
+    return json(appended.value, '已确认累计收款');
   }
+
+  if (body.appendToExisting === true) return fail(409, '原记录已删除或日期渠道已变化，请重新核对');
 
   const now = new Date().toISOString();
   const receipt = {
@@ -801,7 +761,7 @@ export async function handleCreate(db, request) {
   };
 
   receipts.push(receipt);
-  await writeReceipts(db, mergeUserReceipts(allReceipts, userId, receipts));
+  await writeReceipts(db, mergeUserReceipts(allReceipts, userId, receipts), expectedRevision);
   return json(receipt, '新增成功');
 }
 
@@ -812,47 +772,18 @@ export async function handleImport(db, request) {
   const body = await request.json().catch(() => null);
   const { errors, values } = validateImportPayload(body || {});
   if (errors.length) return fail(400, errors.join('；'));
-
+  const expectedRevision = await receiptRevision(db);
   const allReceipts = await readReceipts(db);
   const receipts = userReceipts(allReceipts, userId);
-  const blocked = values.filter((item) => item.granularity === 'month' && hasDayDataForMonth(receipts, item.channel, item.period));
-  if (blocked.length) {
-    return fail(409, `以下月份已有日数据，不能导入月数据：${blocked.map((item) => item.period).join('、')}`);
-  }
-
-  const now = new Date().toISOString();
-  let created = 0;
-  let updated = 0;
-
-  for (const value of values) {
-    const index = receipts.findIndex(
-      (item) =>
-        item.channel === value.channel &&
-        item.granularity === value.granularity &&
-        item.period === value.period
-    );
-
-    if (index === -1) {
-      receipts.push({
-        id: crypto.randomUUID().replace(/-/g, '').slice(0, 10),
-        userId,
-        ...value,
-        createdAt: now,
-        updatedAt: now
-      });
-      created += 1;
-    } else {
-      receipts[index] = {
-        ...receipts[index],
-        ...value,
-        updatedAt: now
-      };
-      updated += 1;
-    }
-  }
-
-  await writeReceipts(db, mergeUserReceipts(allReceipts, userId, receipts));
-  return json({ created, updated, total: values.length }, '导入成功');
+  const plan = buildImportPlan(values, receipts);
+  const previewToken = await importPreviewToken(userId, values, receipts);
+  if (body.preview === true) return json({ ...plan, previewToken }, '核对完成，尚未写入');
+  if (plan.blocked) return fail(409, '存在文件重复或日/月汇总冲突，请先修正文件并重新核对');
+  if (body.previewToken !== previewToken) return fail(409, '台账或导入内容已变化，请重新核对后再确认');
+  if (plan.needsConfirmation && body.confirmed !== true) return fail(409, '存在同周期同渠道冲突或月汇总口径变化，请明确确认后再导入');
+  const nextReceipts = applyImportPlan(values, receipts, plan, userId, () => crypto.randomUUID().replace(/-/g, '').slice(0, 10), new Date().toISOString());
+  if (plan.counts.new + plan.counts.conflict > 0) await writeReceipts(db, mergeUserReceipts(allReceipts, userId, nextReceipts), expectedRevision);
+  return json({ created: plan.counts.new, updated: plan.counts.conflict, skipped: plan.counts.duplicate, total: values.length }, '导入成功');
 }
 
 export async function handleUpdate(db, request, id) {
@@ -863,6 +794,7 @@ export async function handleUpdate(db, request, id) {
   const { errors, value } = validateEntryPayload(body || {});
   if (errors.length) return fail(400, errors.join('；'));
 
+  const expectedRevision = await receiptRevision(db);
   const allReceipts = await readReceipts(db);
   const receipts = userReceipts(allReceipts, userId);
   const index = receipts.findIndex((item) => item.id === id);
@@ -887,7 +819,7 @@ export async function handleUpdate(db, request, id) {
     updatedAt: new Date().toISOString()
   };
 
-  await writeReceipts(db, mergeUserReceipts(allReceipts, userId, receipts));
+  await writeReceipts(db, mergeUserReceipts(allReceipts, userId, receipts), expectedRevision);
   return json(receipts[index], '修改成功');
 }
 
@@ -895,11 +827,12 @@ export async function handleDelete(db, request, id) {
   const auth = await requireCurrentUser(db, request);
   if (auth.response) return auth.response;
   const userId = auth.userId;
+  const expectedRevision = await receiptRevision(db);
   const allReceipts = await readReceipts(db);
   const receipts = userReceipts(allReceipts, userId);
   const nextReceipts = receipts.filter((item) => item.id !== id);
   if (nextReceipts.length === receipts.length) return fail(404, '数据不存在');
 
-  await writeReceipts(db, mergeUserReceipts(allReceipts, userId, nextReceipts));
+  await writeReceipts(db, mergeUserReceipts(allReceipts, userId, nextReceipts), expectedRevision);
   return json({ id }, '删除成功');
 }
