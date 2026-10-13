@@ -64,7 +64,7 @@ defineExpose({ validate: () => localForm.value.validate(), clearValidate: () => 
                   </el-select>
                 </el-form-item>
               </div>
-              <el-form-item label="备注 / 异常说明">
+              <el-form-item label="备注 / 异常说明" class="entry-remark-item">
                 <el-input v-model="fields.remark" type="textarea" :rows="isMobile ? 2 : 4" maxlength="200" show-word-limit placeholder="可填写活动、退款、异常波动等说明" />
               </el-form-item>
             </el-form>

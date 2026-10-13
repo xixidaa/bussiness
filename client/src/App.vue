@@ -1570,6 +1570,7 @@ function handleDefaultRangeSettingChange(nextValue) {
 }
 
 function switchView(view) {
+  hideChartTooltips();
   activeView.value = view;
   window.location.hash = view;
   nextTick(() => {
@@ -2315,6 +2316,7 @@ function addOperationLog(action, detail) {
 
 function renderCharts() {
   if (activeView.value !== 'dashboard') return;
+  hideChartTooltips();
   renderTrendChart();
   renderMixChart();
 }
@@ -2382,7 +2384,7 @@ function renderTrendChart() {
   trendChart.setOption({
     aria: { enabled: true, description: trendChartDescription.value },
     color: ['#0f766e', '#94a3b8', '#2563eb', '#f97316', '#7c3aed', '#be3455', '#0891b2'],
-    tooltip: createChartTooltip(element, { trigger: 'axis', unit, mobile }),
+    tooltip: createChartTooltip({ trigger: 'axis', unit, mobile }),
     legend: { type: 'scroll', top: 0, data: series.map((item) => item.name) },
     grid: { top: 52, left: mobile ? 4 : 12, right: mobile ? 8 : 18, bottom: 14, containLabel: true },
     xAxis: { type: 'category', boundaryGap: rows.length <= 1 || isAnnualYearComparison.value, data: labels,
@@ -2405,7 +2407,7 @@ function renderMixChart() {
   mixChart.setOption({
     aria: { enabled: true, description: mixChartDescription.value },
     color: ['#0f766e', '#2563eb', '#f97316', '#7c3aed'],
-    tooltip: createChartTooltip(element, { trigger: 'item', unit: '元', mobile }),
+    tooltip: createChartTooltip({ trigger: 'item', unit: '元', mobile }),
     graphic: total
       ? []
       : [{ type: 'text', left: 'center', top: 'middle', style: { text: '暂无渠道数据', fill: '#667789', fontSize: 14 } }],
@@ -2423,7 +2425,13 @@ function renderMixChart() {
   mixChart.resize();
 }
 
+function hideChartTooltips() {
+  trendChart?.dispatchAction({ type: 'hideTip' });
+  mixChart?.dispatchAction({ type: 'hideTip' });
+}
+
 function resizeCharts() {
+  hideChartTooltips();
   trendChart?.resize();
   mixChart?.resize();
 }
@@ -2475,10 +2483,12 @@ onMounted(async () => {
     setActiveUserId('');
   }
   window.addEventListener('resize', resizeCharts);
+  window.addEventListener('scroll', hideChartTooltips, { capture: true, passive: true });
 });
 
 onBeforeUnmount(() => {
   window.removeEventListener('resize', resizeCharts);
+  window.removeEventListener('scroll', hideChartTooltips, true);
   trendChart?.dispose();
   mixChart?.dispose();
 });

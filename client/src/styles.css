@@ -635,6 +635,12 @@ input {
   height: 220px;
 }
 
+.chart-box,
+.mix-chart {
+  position: relative;
+  overflow: hidden;
+}
+
 .chart-data-details {
   margin-top: 10px;
   color: var(--muted);
@@ -1777,4 +1783,46 @@ input {
   }
   .record-page-grid .entry-actions .el-button { height: 32px; min-height: 32px; padding: 0 6px; font-size: 12px; }
   .record-page-grid .entry-actions .clear-entry-button { grid-column: auto; }
+}
+
+@media (max-width: 760px) {
+  /* 使用屏幕剩余高度铺满录入卡片，键盘弹出或内容增多时仍可自然滚动。 */
+  .app-shell.is-entry-view {
+    min-height: 100vh;
+    min-height: 100dvh;
+    grid-template-rows: auto 1fr;
+  }
+  .app-shell.is-entry-view .main-shell,
+  .app-shell.is-entry-view .workspace,
+  .app-shell.is-entry-view .record-page-grid,
+  .record-page-grid .form-panel,
+  .record-page-grid .entry-form {
+    display: flex;
+    flex-direction: column;
+  }
+  .app-shell.is-entry-view .workspace,
+  .app-shell.is-entry-view .record-page-grid,
+  .record-page-grid .form-panel,
+  .record-page-grid .entry-form {
+    flex: 1;
+  }
+  .record-page-grid .entry-form .entry-remark-item {
+    display: flex;
+    flex-direction: column;
+    flex: 1;
+  }
+  .record-page-grid .entry-remark-item .el-form-item__content,
+  .record-page-grid .entry-remark-item .el-textarea {
+    display: flex;
+    flex-direction: column;
+    align-items: stretch;
+    flex: 1;
+  }
+  .record-page-grid .entry-remark-item .el-textarea__inner {
+    min-height: 72px;
+    flex: 1;
+  }
+  .record-page-grid .entry-actions {
+    flex-shrink: 0;
+  }
 }
