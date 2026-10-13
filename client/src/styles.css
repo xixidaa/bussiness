@@ -1691,11 +1691,6 @@ input {
     padding-bottom: calc(16px + var(--entry-keyboard-inset));
   }
 
-  .form-panel.is-input-focused .entry-actions {
-    position: static;
-    box-shadow: none;
-  }
-
   .entry-form .el-form-item {
     scroll-margin-block: 16px;
   }
@@ -1705,4 +1700,81 @@ input {
   .entry-form textarea {
     font-size: 16px;
   }
+}
+
+@media (max-width: 760px) {
+  /* 录入页使用紧凑布局，保留所有字段和操作。 */
+  .app-shell.is-entry-view .side-nav {
+    padding: 8px 10px;
+    row-gap: 6px;
+  }
+  .app-shell.is-entry-view .side-nav .brand-mark {
+    width: 28px;
+    height: 28px;
+    flex-basis: 28px;
+  }
+  .app-shell.is-entry-view .side-nav .brand-block strong { font-size: 14px; }
+  .app-shell.is-entry-view .current-user .el-dropdown,
+  .app-shell.is-entry-view .current-user-avatar,
+  .app-shell.is-entry-view .logout-button {
+    width: 32px;
+    height: 32px;
+    min-width: 32px;
+    min-height: 32px;
+  }
+  .app-shell.is-entry-view .nav-item {
+    min-height: 40px;
+    gap: 3px;
+    padding: 4px;
+    font-size: 16px;
+  }
+  .app-shell.is-entry-view .nav-item .el-icon { font-size: 16px; }
+  .app-shell.is-entry-view .nav-item small { font-size: 11px; line-height: 14px; }
+  .app-shell.is-entry-view .main-shell { padding: 10px 10px max(12px, env(safe-area-inset-bottom)); }
+  .app-shell.is-entry-view .topbar { gap: 8px; margin-bottom: 8px; }
+  .app-shell.is-entry-view .topbar h1 { font-size: 18px; }
+  .app-shell.is-entry-view .topbar-actions { gap: 6px; }
+  .app-shell.is-entry-view .topbar-actions .el-button { height: 32px; min-height: 32px; padding: 0 8px; font-size: 12px; }
+
+  .record-page-grid .form-panel { min-width: 0; padding: 10px; }
+  .record-page-grid .form-panel.is-input-focused { padding-bottom: calc(10px + var(--entry-keyboard-inset)); }
+  .record-page-grid .form-panel > .panel-heading { margin-bottom: 8px; }
+  .record-page-grid .form-panel > .panel-heading .el-tag { height: 20px; font-size: 11px; }
+  .record-page-grid .form-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0 10px; }
+  .record-page-grid .entry-period-item,
+  .record-page-grid .entry-attachment-item { grid-column: 1 / -1; }
+  .record-page-grid .entry-form .el-form-item { min-width: 0; margin-bottom: 10px; }
+  .record-page-grid .entry-form .el-form-item__label { height: auto; margin-bottom: 4px; font-size: 12px; line-height: 18px; }
+  .record-page-grid .entry-form .el-input__wrapper,
+  .record-page-grid .entry-form .el-select__wrapper,
+  .record-page-grid .entry-form .el-input-number,
+  .record-page-grid .entry-form .el-segmented,
+  .record-page-grid .entry-form .el-date-editor {
+    height: 34px;
+    min-height: 34px;
+    --el-input-height: 34px;
+  }
+  .record-page-grid .entry-form .el-input-number__decrease,
+  .record-page-grid .entry-form .el-input-number__increase { width: 26px; }
+  .record-page-grid .entry-form .el-input-number .el-input__wrapper { padding-right: 28px; padding-left: 28px; }
+  .record-page-grid .entry-form .el-select__selected-item,
+  .record-page-grid .entry-form .el-segmented__item-label { font-size: 13px; }
+  .record-page-grid .entry-form .el-textarea__inner { min-height: 56px; padding: 6px 8px; line-height: 1.4; }
+  .record-page-grid .entry-form .el-input__count { font-size: 10px; }
+
+  .record-page-grid .mobile-entry-checks { gap: 6px; padding-top: 8px; }
+  .record-page-grid .mobile-entry-checks > strong { font-size: 12px; }
+  .record-page-grid .mobile-entry-checks .check-list { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 4px; }
+  .record-page-grid .mobile-entry-checks .check-list li { margin: 0; padding: 4px 6px; font-size: 11px; line-height: 16px; }
+
+  /* 保存、继续、清空只占一行，避免覆盖人数和备注。 */
+  .record-page-grid .entry-actions {
+    grid-template-columns: minmax(52px, 0.8fr) minmax(100px, 1.3fr) minmax(62px, 0.85fr);
+    gap: 6px;
+    margin: 8px -10px -10px;
+    padding: 6px 10px max(6px, env(safe-area-inset-bottom));
+    box-shadow: 0 -2px 8px rgba(30, 41, 59, 0.06);
+  }
+  .record-page-grid .entry-actions .el-button { height: 32px; min-height: 32px; padding: 0 6px; font-size: 12px; }
+  .record-page-grid .entry-actions .clear-entry-button { grid-column: auto; }
 }

@@ -67,7 +67,7 @@
     </section>
   </div>
 
-  <div v-else class="app-shell" :class="{ 'is-entry-input-focused': activeView === 'record' && entryInputFocused }">
+  <div v-else class="app-shell" :class="{ 'is-entry-view': activeView === 'record', 'is-entry-input-focused': activeView === 'record' && entryInputFocused }">
     <aside class="side-nav">
       <div class="brand-block">
         <span class="brand-mark">收</span>
@@ -587,6 +587,7 @@
             ref="formRef" :form="form" :rules="rules" :enabled-channel-options="enabledChannelOptions"
             :entry-granularity-options="entryGranularityOptions" :entry-picker="entryPicker" :saving="saving"
             :editing-id="editingId" :draft-saved-at="draftSavedAt" :period-valid="isPeriodInRange(form.granularity, form.period)"
+            :min-period="form.granularity === 'month' ? '2020-01' : '2020-01-01'" :max-period="getCurrentPeriod(form.granularity)"
             @field-change="({ field, value }) => form[field] = value" @granularity-change="handleFormGranularityChange"
             @save="submitForm" @clear="clearEntryForm" @input-focus-change="entryInputFocused = $event"
           />
@@ -968,6 +969,7 @@ import { buildDashboardScope, dashboardChange, dashboardChannelRows, dashboardEx
 import ImportReconciliation from './components/ImportReconciliation.vue';
 import ReceiptEntryForm from './components/ReceiptEntryForm.vue';
 import { createEntrySession, receiptPayload } from './utils/entry-session.js';
+import { createChartTooltip } from './utils/chart-tooltip.js';
 
 const USER_STORAGE_KEY = 'merchant-receipt-current-user-id';
 const SETTINGS_KEY = 'merchant-receipt-settings-v2';
@@ -1189,8 +1191,8 @@ const analyticsPicker = computed(() => {
 
 const entryPicker = computed(() => (
   form.granularity === 'month'
-    ? { type: 'month', format: 'YYYY 年 MM 月', valueFormat: 'YYYY-MM', placeholder: '选择月份' }
-    : { type: 'date', format: 'YYYY 年 MM 月 DD 日', valueFormat: 'YYYY-MM-DD', placeholder: '选择日期' }
+    ? { type: 'month', format: 'YYYY年MM月', valueFormat: 'YYYY-MM', placeholder: '选择月份' }
+    : { type: 'date', format: 'YYYY年MM月DD日', valueFormat: 'YYYY-MM-DD', placeholder: '选择日期' }
 ));
 
 const recordFilterPicker = computed(() => (
@@ -2380,7 +2382,7 @@ function renderTrendChart() {
   trendChart.setOption({
     aria: { enabled: true, description: trendChartDescription.value },
     color: ['#0f766e', '#94a3b8', '#2563eb', '#f97316', '#7c3aed', '#be3455', '#0891b2'],
-    tooltip: { trigger: 'axis', valueFormatter: (value) => `${value}${unit}` },
+    tooltip: createChartTooltip(element, { trigger: 'axis', unit, mobile }),
     legend: { type: 'scroll', top: 0, data: series.map((item) => item.name) },
     grid: { top: 52, left: mobile ? 4 : 12, right: mobile ? 8 : 18, bottom: 14, containLabel: true },
     xAxis: { type: 'category', boundaryGap: rows.length <= 1 || isAnnualYearComparison.value, data: labels,
@@ -2403,7 +2405,7 @@ function renderMixChart() {
   mixChart.setOption({
     aria: { enabled: true, description: mixChartDescription.value },
     color: ['#0f766e', '#2563eb', '#f97316', '#7c3aed'],
-    tooltip: { trigger: 'item' },
+    tooltip: createChartTooltip(element, { trigger: 'item', unit: '元', mobile }),
     graphic: total
       ? []
       : [{ type: 'text', left: 'center', top: 'middle', style: { text: '暂无渠道数据', fill: '#667789', fontSize: 14 } }],

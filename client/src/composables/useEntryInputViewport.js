@@ -2,11 +2,11 @@ import { onBeforeUnmount, onMounted, readonly, shallowRef } from 'vue';
 
 // 只处理录入时的可见区域，不改变表单值或草稿。
 export function useEntryInputViewport(panelRef) {
+  const isMobile = shallowRef(false);
   const isInputFocused = shallowRef(false);
   const keyboardInset = shallowRef(0);
   let viewport;
   let mobile;
-  let fullHeight = 0;
   let frame = 0;
   let blurTimer;
 
@@ -22,7 +22,13 @@ export function useEntryInputViewport(panelRef) {
     const input = focusedInput();
     if (!isInputFocused.value || !input) return;
     const top = (viewport ? viewport.offsetTop : 0) + 16;
-    const bottom = top + (viewport ? viewport.height : window.innerHeight) - 32;
+    const viewportBottom = top + (viewport ? viewport.height : window.innerHeight) - 16;
+    let bottom = viewportBottom - 16;
+    const actions = panelRef.value.querySelector('.entry-actions');
+    if (actions && window.getComputedStyle(actions).position === 'sticky') {
+      const actionBounds = actions.getBoundingClientRect();
+      if (actionBounds.bottom > top && actionBounds.top < viewportBottom) bottom = Math.min(bottom, actionBounds.top - 8);
+    }
     const field = input.closest('.el-form-item');
     const fieldBounds = field.getBoundingClientRect();
     // 输入框过高时优先显示输入内容；空间充足时同时显示字段名称。
@@ -33,17 +39,17 @@ export function useEntryInputViewport(panelRef) {
 
   function updateViewport() {
     const input = focusedInput();
-    isInputFocused.value = mobile.matches && Boolean(input);
+    isMobile.value = mobile.matches;
+    isInputFocused.value = isMobile.value && Boolean(input);
     const visibleHeight = viewport ? viewport.height : window.innerHeight;
     if (!isInputFocused.value) {
-      fullHeight = Math.max(window.innerHeight, visibleHeight);
       keyboardInset.value = 0;
       if (frame) cancelAnimationFrame(frame);
       frame = 0;
       return;
     }
-    fullHeight = Math.max(fullHeight, window.innerHeight, visibleHeight);
-    const coveredHeight = fullHeight - visibleHeight;
+    // 浏览器已经随键盘缩小布局时不再额外补出整块键盘高度。
+    const coveredHeight = window.innerHeight - visibleHeight;
     // 地址栏伸缩与页面缩放不当作键盘，避免额外留白。
     keyboardInset.value = (!viewport || viewport.scale === 1) && coveredHeight > 120 ? coveredHeight : 0;
     if (frame) cancelAnimationFrame(frame);
@@ -82,5 +88,5 @@ export function useEntryInputViewport(panelRef) {
     }
   });
 
-  return { isInputFocused: readonly(isInputFocused), keyboardInset: readonly(keyboardInset), handleFocusIn, handleFocusOut };
+  return { isMobile: readonly(isMobile), isInputFocused: readonly(isInputFocused), keyboardInset: readonly(keyboardInset), handleFocusIn, handleFocusOut };
 }
