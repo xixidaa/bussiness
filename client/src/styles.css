@@ -1680,3 +1680,29 @@ input {
     width: 100%;
   }
 }
+
+@media (max-width: 760px) {
+  /* 键盘弹出时让导航与保存栏随页面滚动，把可见空间留给当前输入。 */
+  .app-shell.is-entry-input-focused .side-nav {
+    position: static;
+  }
+
+  .form-panel.is-input-focused {
+    padding-bottom: calc(16px + var(--entry-keyboard-inset));
+  }
+
+  .form-panel.is-input-focused .entry-actions {
+    position: static;
+    box-shadow: none;
+  }
+
+  .entry-form .el-form-item {
+    scroll-margin-block: 16px;
+  }
+
+  /* 避免 iOS 聚焦小字号输入框时放大页面。 */
+  .entry-form input,
+  .entry-form textarea {
+    font-size: 16px;
+  }
+}

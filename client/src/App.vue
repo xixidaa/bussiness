@@ -67,7 +67,7 @@
     </section>
   </div>
 
-  <div v-else class="app-shell">
+  <div v-else class="app-shell" :class="{ 'is-entry-input-focused': activeView === 'record' && entryInputFocused }">
     <aside class="side-nav">
       <div class="brand-block">
         <span class="brand-mark">收</span>
@@ -243,7 +243,8 @@
           <details class="dashboard-calculation-note">
             <summary>统计口径与计算说明 · {{ analyticsRangeLabel }} · {{ analytics.channel === 'all' ? '全部渠道' : channelText(analytics.channel) }}</summary>
             <p>当前范围指标、趋势、渠道分析和导出使用同一时间范围与渠道。月度及年度按同渠道同月份日数据优先汇总；已有日数据的月记录不重复计入。日度只统计原始日记录，月汇总不会虚分到每天。</p>
-            <p>录入人数为各有效记录人数之和，未去重，也不等于真实交易笔数。平均每人收款＝范围金额÷录入人数，人数为 0 时不可计算。本年卡片独立展示本年金额，并遵循当前渠道筛选。上期为紧邻当前范围之前、数量相同的日/月/年周期，具体边界见趋势说明；月/年按完整日历周期比较。</p>
+            <p>录入人数为各有效记录人数之和，未去重，也不等于真实交易笔数。平均每人收款＝范围金额÷录入人数，人数为 0 时不可计算。本年卡片独立展示本年金额，并遵循当前渠道筛选。上期为紧邻当前范围之前、数量相同的日/月/年周期，具体边界见下方说明；月/年按完整日历周期比较。</p>
+            <p>{{ comparisonNote }}</p>
           </details>
 
           <section class="metric-grid">
@@ -264,11 +265,9 @@
                 <el-segmented v-model="analytics.metric" :options="metricOptions" @change="renderCharts" />
               </div>
               <div class="dashboard-trend-controls">
-                <el-checkbox v-model="analytics.comparePrevious">显示同长上期</el-checkbox>
                 <el-checkbox v-model="analytics.showChannels">查看渠道曲线</el-checkbox>
-                <span>{{ comparisonNote }}</span>
               </div>
-              <p class="chart-interaction-note">点击图中数据点可核查对应周期、渠道的原始台账；未录入周期按 0 展示。</p>
+              <p class="chart-interaction-note">图表展示当前筛选范围的收款金额或人数；未录入周期按 0 展示。</p>
               <div ref="trendChartRef" class="chart-box" role="img" :aria-label="trendChartDescription"></div>
               <details class="chart-data-details">
                 <summary>查看趋势明细</summary>
@@ -589,7 +588,7 @@
             :entry-granularity-options="entryGranularityOptions" :entry-picker="entryPicker" :saving="saving"
             :editing-id="editingId" :draft-saved-at="draftSavedAt" :period-valid="isPeriodInRange(form.granularity, form.period)"
             @field-change="({ field, value }) => form[field] = value" @granularity-change="handleFormGranularityChange"
-            @save="submitForm" @clear="clearEntryForm"
+            @save="submitForm" @clear="clearEntryForm" @input-focus-change="entryInputFocused = $event"
           />
 
           <aside class="panel side-helper">
@@ -1065,6 +1064,7 @@ const importing = ref(false);
 const loginLoading = ref(false);
 const userSaving = ref(false);
 const userDialogVisible = ref(false);
+const entryInputFocused = ref(false);
 
 let trendChart = null;
 let mixChart = null;
@@ -1103,7 +1103,6 @@ const analytics = reactive({
   yearCompareView: 'monthly',
   channel: 'all',
   metric: 'amount',
-  comparePrevious: true,
   showChannels: false
 });
 
@@ -2338,22 +2337,20 @@ function renderTrendChart() {
   if (!trendChart) return;
   const unit = analytics.metric === 'amount' ? '元' : '人';
   const mobile = window.matchMedia('(max-width: 760px)').matches;
-  const displayComparison = analytics.comparePrevious && hasComparableData.value;
   const rows = visibleTrendRows.value;
   let labels;
   let series;
   if (isAnnualYearComparison.value) {
     labels = analytics.years.map((year) => `${year}年`);
     series = [{ name: '所选年度合计', type: 'bar', barMaxWidth: 44, data: annualComparisonRows.value.map((row) => row.summary.total[analytics.metric]) }];
-    if (displayComparison) series.push({ name: '同长上期合计', type: 'bar', barMaxWidth: 36, itemStyle: { opacity: 0.45 }, data: visiblePreviousTrendRows.value.map((row) => row.summary.total[analytics.metric]) });
     if (analytics.showChannels) series.push(...dashboardChannelOptions.value.map((channel) => ({ name: channel.label, type: 'bar', barMaxWidth: 24, data: annualComparisonRows.value.map((row) => row.summary[channel.value][analytics.metric]) })));
   } else if (isMonthlyYearComparison.value) {
     labels = Array.from({ length: 12 }, (_, index) => `${index + 1}月`);
-    const years = [...analytics.years, ...(displayComparison ? dashboardScope.value.previousPeriods : [])];
-    const monthly = [...trendRows.value, ...previousMonthTrendRows.value];
+    const years = analytics.years;
+    const monthly = trendRows.value;
     series = years.map((year) => ({
       name: `${year} 年`, type: 'line', smooth: false, symbolSize: 7,
-      lineStyle: { width: analytics.years.includes(year) ? 3 : 2, type: analytics.years.includes(year) ? 'solid' : 'dashed' },
+      lineStyle: { width: 3 },
       data: Array.from({ length: 12 }, (_, index) => {
         const row = monthly.find((item) => item.period === `${year}-${pad(index + 1)}`);
         return filterSummaryByChannel(row.summary, analytics.channel).total[analytics.metric];
@@ -2374,16 +2371,12 @@ function renderTrendChart() {
       lineStyle: { width: 4 }, areaStyle: singlePoint ? undefined : { opacity: 0.08 },
       data: rows.map((row) => row.summary.total[analytics.metric])
     }];
-    if (displayComparison) series.push({
-      name: '同长上期合计', type: singlePoint ? 'bar' : 'line', smooth: false, symbolSize: 6, barMaxWidth: 34,
-      lineStyle: { type: 'dashed', width: 2 }, itemStyle: { opacity: 0.6 },
-      data: visiblePreviousTrendRows.value.map((row) => row.summary.total[analytics.metric])
-    });
     if (analytics.showChannels) series.push(...dashboardChannelOptions.value.map((channel) => ({
       name: channel.label, type: singlePoint ? 'bar' : 'line', smooth: false, symbolSize: 5, barMaxWidth: 24,
       lineStyle: { width: 1.5 }, data: rows.map((row) => row.summary[channel.value][analytics.metric])
     })));
   }
+  for (const item of series) item.cursor = 'default';
   trendChart.setOption({
     aria: { enabled: true, description: trendChartDescription.value },
     color: ['#0f766e', '#94a3b8', '#2563eb', '#f97316', '#7c3aed', '#be3455', '#0891b2'],
@@ -2396,21 +2389,6 @@ function renderTrendChart() {
     series
   }, true);
   trendChart.off('click');
-  trendChart.on('click', (params) => {
-    if (params.componentType !== 'series') return;
-    if (isAnnualYearComparison.value) {
-      const period = params.seriesName === '同长上期合计' ? dashboardScope.value.previousPeriods[params.dataIndex] : analytics.years[params.dataIndex];
-      const channel = channelOptions.find((item) => item.label === params.seriesName);
-      drillToLedger(period, 'year', channel ? channel.value : analytics.channel);
-    } else if (isMonthlyYearComparison.value) {
-      const channel = channelOptions.find((item) => params.seriesName.endsWith(` · ${item.label}`));
-      drillToLedger(`${params.seriesName.slice(0, 4)}-${pad(params.dataIndex + 1)}`, 'month', channel ? channel.value : analytics.channel);
-    } else {
-      const period = params.seriesName === '同长上期合计' ? visiblePreviousTrendRows.value[params.dataIndex].period : rows[params.dataIndex].period;
-      const channel = channelOptions.find((item) => item.label === params.seriesName);
-      drillToLedger(period, analytics.dimension, channel ? channel.value : analytics.channel);
-    }
-  });
   trendChart.resize();
 }
 
@@ -2475,7 +2453,7 @@ watch(
 );
 
 watch(
-  () => [analytics.channel, analytics.metric, analytics.comparePrevious, analytics.showChannels],
+  () => [analytics.channel, analytics.metric, analytics.showChannels],
   () => renderCharts()
 );
 

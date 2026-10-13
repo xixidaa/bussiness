@@ -165,7 +165,8 @@ async function navigate(page, view) {
       assert.equal(metrics.find((item) => item['指标'] === '当前范围收款金额')['值'], 150, '导出指标应使用看板渠道筛选');
       assert.ok(metrics.every((item) => item['渠道筛选'] === '现金'), '导出应标注与看板一致的渠道');
       assert.ok(await page.locator('.chart-box canvas').count() > 0, '看板趋势应正常渲染');
-      assert.ok(await page.locator('.dashboard-trend-controls .el-checkbox').count() >= 2, '手机和电脑都应支持上期与渠道曲线开关');
+      assert.equal(await page.locator('.dashboard-trend-controls .el-checkbox').count(), 1, '趋势仅保留渠道曲线开关');
+      assert.equal(await page.getByText('显示同长上期', { exact: true }).count(), 0, '趋势不提供同长上期系列开关');
       await page.locator('.dashboard-trend-controls').getByText('查看渠道曲线', { exact: true }).click();
       await page.waitForTimeout(100);
       await page.locator('.dashboard-trend-controls').getByText('查看渠道曲线', { exact: true }).click();
@@ -180,15 +181,14 @@ async function navigate(page, view) {
         const index = series.data.findIndex((value) => value === 150);
         const coordinate = chart.convertToPixel({ seriesIndex: 0 }, [index, series.type === 'bar' ? 75 : 150]);
         const bounds = element.getBoundingClientRect();
-        return { x: bounds.x + coordinate[0], y: bounds.y + coordinate[1] };
+        return { x: bounds.x + coordinate[0], y: bounds.y + coordinate[1], seriesNames: option.series.map((item) => item.name) };
       });
+      assert.ok(!trendPoint.seriesNames.includes('同长上期合计'), '趋势不得加入同长上期合计系列');
+      const dashboardURL = page.url();
       await page.mouse.click(trendPoint.x, trendPoint.y);
-      await page.waitForURL('**/#ledger');
       await page.waitForTimeout(400);
-      const drillList = page.locator(width < 760 ? '.mobile-record-list' : '.desktop-table');
-      assert.ok((await drillList.innerText()).includes('150.00'), '点击趋势数据点应定位真实现金台账');
-      assert.ok((await page.locator('.context-alert').innerText()).includes('现金'), '趋势定位应带渠道筛选');
-      await screenshot(page, width, 'trend-ledger');
+      assert.equal(page.url(), dashboardURL, '点击折线或柱状图不得跳转台账');
+      await screenshot(page, width, 'trend-interaction');
 
       await page.locator('.topbar-actions').getByRole('button', { name: '新建收款', exact: true }).click();
       await field(page, '统计粒度').getByText('月度', { exact: true }).click();
@@ -220,7 +220,7 @@ async function navigate(page, view) {
       assert.equal((await afterPreview.json()).data[0].amount, 150, '预校验不得改变已保存金额');
       await screenshot(page, width, 'import');
       assert.equal(errors.length, 0, `页面异常：${errors.join('; ')}`);
-      results.push({ width, checks: ['登录凭据隐藏', '真实API提交日期渠道', '保存并继续', '取消累计无写入', '确认累计金额人数', '普通保存沿用', '草稿恢复', '月度连续录入', '台账渠道筛选', '台账编辑', '台账导出', '图表与统计开关', '实际趋势数据点定位台账', '看板筛选及导出一致', '重复导入提示', '冲突差额核对未确认不写入', '无横向溢出'], errors });
+      results.push({ width, checks: ['登录凭据隐藏', '真实API提交日期渠道', '保存并继续', '取消累计无写入', '确认累计金额人数', '普通保存沿用', '草稿恢复', '月度连续录入', '台账渠道筛选', '台账编辑', '台账导出', '图表与渠道开关', '趋势无上期系列且点击不跳转', '看板筛选及导出一致', '重复导入提示', '冲突差额核对未确认不写入', '无横向溢出'], errors });
       await context.close();
       console.log(`${width}px 验证通过`);
     }

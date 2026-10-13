@@ -1,5 +1,6 @@
 <script setup>
-import { computed, reactive, ref } from 'vue';
+import { computed, onBeforeUnmount, reactive, ref, watch } from 'vue';
+import { useEntryInputViewport } from '../composables/useEntryInputViewport.js';
 
 const props = defineProps({
   form: { type: Object, required: true }, rules: { type: Object, required: true },
@@ -7,8 +8,12 @@ const props = defineProps({
   entryPicker: { type: Object, required: true }, saving: Boolean, editingId: String,
   draftSavedAt: String, periodValid: Boolean
 });
-const emit = defineEmits(['field-change', 'granularity-change', 'save', 'clear']);
+const emit = defineEmits(['field-change', 'granularity-change', 'save', 'clear', 'input-focus-change']);
 const localForm = ref();
+const panelRef = ref();
+const { isInputFocused, keyboardInset, handleFocusIn, handleFocusOut } = useEntryInputViewport(panelRef);
+watch(isInputFocused, (value) => emit('input-focus-change', value), { flush: 'sync' });
+onBeforeUnmount(() => emit('input-focus-change', false));
 // 表单值由父层持有，子组件只发出字段变更和提交事件。
 const fields = reactive(Object.fromEntries(
   ['granularity', 'channel', 'period', 'amount', 'people', 'remark', 'attachmentStatus'].map((field) => [field, computed({
@@ -22,7 +27,7 @@ defineExpose({ validate: () => localForm.value.validate(), clearValidate: () => 
 </script>
 
 <template>
-<section class="panel form-panel">
+<section ref="panelRef" class="panel form-panel" :class="{ 'is-input-focused': isInputFocused }" :style="{ '--entry-keyboard-inset': `${keyboardInset}px` }" @focusin="handleFocusIn" @focusout="handleFocusOut">
             <div class="panel-heading">
               <div>
                 <span class="eyebrow">Entry</span>
@@ -52,10 +57,10 @@ defineExpose({ validate: () => localForm.value.validate(), clearValidate: () => 
                   />
                 </el-form-item>
                 <el-form-item label="收款金额" prop="amount">
-                  <el-input-number v-model="fields.amount" :min="0" :precision="2" :step="100" class="full-control" />
+                  <el-input-number v-model="fields.amount" inputmode="decimal" :min="0" :precision="2" :step="100" class="full-control" />
                 </el-form-item>
                 <el-form-item label="收款人数" prop="people">
-                  <el-input-number v-model="fields.people" :min="0" :precision="0" :step="1" class="full-control" />
+                  <el-input-number v-model="fields.people" inputmode="numeric" :min="0" :precision="0" :step="1" class="full-control" />
                 </el-form-item>
                 <el-form-item label="附件状态">
                   <el-select v-model="fields.attachmentStatus" class="full-control">
